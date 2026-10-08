@@ -1,7 +1,7 @@
 import nodemailer from 'nodemailer';
 import { config } from '../config.js';
 
-let transport: nodemailer.Transporter | null = null;
+let transport: ReturnType<typeof nodemailer.createTransport> | null = null;
 const getTransport = () => (transport ??= nodemailer.createTransport(config.SMTP_URL));
 
 export const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
