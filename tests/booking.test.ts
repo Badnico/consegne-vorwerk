@@ -4,7 +4,9 @@ import { pool } from '../src/lib/db.js';
 import { migrate } from '../src/lib/migrate.js';
 import { bookingWindow } from '../src/domain/slots.js';
 import { createDelivery, declineDelivery, bookSlot, confirmDelivery, getDelivery, markDelivered, markFailedLetCustomerChoose, deleteDelivery } from '../src/domain/deliveries.js';
-import { saveArea } from '../src/domain/settings.js';
+import { saveArea, getMessages, fillText } from '../src/domain/settings.js';
+import { messageVars } from '../src/notify/notifier.js';
+import { fromAddress } from '../src/notify/email.js';
 import { createTenant, updateTenant } from '../src/domain/tenants.js';
 import { loginTenant } from '../src/lib/auth.js';
 import { addDays, todayLocal } from '../src/lib/dates.js';
@@ -144,4 +146,18 @@ test("abbonamento: scaduto o sospeso blocca l'accesso, il rinnovo lo riapre", as
   await updateTenant(T, { suspended: false, password: 'nuova-password-123' });
   assert.equal((await loginTenant('uno', 'uno', 'password-lunga-1')).ok, false);
   assert.equal((await loginTenant('uno', 'uno', 'nuova-password-123')).ok, true);
+});
+
+test("modo A: ogni messaggio porta il nome dell'azienda dell'ambiente", async () => {
+  const a = await slot('23:00', 2);
+  const id = await createDelivery(T, { order_ref: order(), customer, address: 'Via Torino 2, Milano', slot_id: a }, 'test');
+  const d = await getDelivery(pool, id, T);
+  assert.equal(d.tenant_name, 'Uno');
+  assert.equal(d.tenant_email, 'uno@example.it');
+  const m = await getMessages(pool, T);
+  const v = messageVars(d, 'proposed');
+  assert.match(fillText(m.wa_proposal, v), /per conto di Uno\./);
+  assert.match(fillText(m.mail_subject, v), /^Uno: la tua consegna /);
+  assert.equal(fromAddress('Vorwerk Consegne <consegne@esempio.it>'), 'consegne@esempio.it');
+  assert.equal(fromAddress('consegne@esempio.it'), 'consegne@esempio.it');
 });

@@ -8,8 +8,16 @@ export const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', 
 /** Testo semplice → HTML: escape e a capo */
 export const para = (s: string) => `<p>${esc(s).replace(/\n/g, '<br>')}</p>`;
 
-export async function sendEmail(to: string, subject: string, text: string, html: string): Promise<string> {
-  const info = await getTransport().sendMail({ from: config.EMAIL_FROM, to, subject, text, html });
+/** Indirizzo di EMAIL_FROM senza il nome: "Vorwerk Consegne <a@b.it>" → "a@b.it" */
+export const fromAddress = (from: string) => (from.match(/<([^>]+)>/)?.[1] ?? from).trim();
+
+/**
+ * Tutte le email partono dallo stesso indirizzo (EMAIL_FROM), ma con il nome dell'azienda come mittente
+ * ("Rossi Elettrodomestici <consegne@...>") e con "Rispondi a" verso l'email dell'azienda.
+ */
+export async function sendEmail(sender: { name: string; replyTo?: string }, to: string, subject: string, text: string, html: string): Promise<string> {
+  const from = { name: sender.name.replace(/[\r\n"<>]/g, ' ').trim() || 'Consegne', address: fromAddress(config.EMAIL_FROM) };
+  const info = await getTransport().sendMail({ from, replyTo: sender.replyTo || undefined, to, subject, text, html });
   return info.messageId;
 }
 

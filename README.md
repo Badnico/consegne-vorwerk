@@ -84,9 +84,13 @@ Le API dell'ambiente (`/api/panel/...`) usano la sessione del pannello. Un'API c
 ## Configurare WhatsApp
 
 1. Crea un'app su Meta for Developers con il prodotto WhatsApp e collega un numero dedicato.
-2. Crea il template `consegna_proposta`, categoria Utility, lingua italiano, con cinque variabili nel corpo e due pulsanti di risposta rapida "Sì" e "No". Testo suggerito in `src/notify/whatsapp.ts`.
+2. Crea il template `consegna_proposta`, categoria Utility, lingua italiano, con sei variabili nel corpo (la seconda è il nome dell'azienda dell'ambiente) e due pulsanti di risposta rapida "Sì" e "No". Testo esatto in `src/notify/whatsapp.ts` e in `GUIDA-ONLINE.md`.
 3. Registra il webhook `https://<dominio>/webhooks/whatsapp` con `WHATSAPP_VERIFY_TOKEN` e iscriviti al campo `messages`.
 4. Compila `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_ACCESS_TOKEN` (token di sistema permanente) e `WHATSAPP_APP_SECRET`.
+
+## Un solo numero e un solo mittente per tutti gli ambienti
+
+WhatsApp ed email sono configurati una volta per tutto il sistema. Ogni messaggio dice per conto di quale azienda arriva: il modello WhatsApp riceve il nome dell'ambiente come variabile `{{2}}`, le email partono dall'indirizzo di `EMAIL_FROM` con il nome dell'azienda come mittente e "Rispondi a" verso l'email dell'ambiente. Nei testi è disponibile il campo `{azienda}`.
 
 ## Prima della produzione
 

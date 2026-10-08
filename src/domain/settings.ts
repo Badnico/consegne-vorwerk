@@ -4,14 +4,14 @@ import { config } from '../config.js';
 /* ---------- testi dei messaggi ---------- */
 
 export const MESSAGE_DEFAULTS = {
-  wa_proposal: 'Ciao {nome}, sono Vorwerk Consegne. Il tuo {prodotto} (ordine {ordine}) arriverà {data} tra le {inizio} e le {fine}.\nSarai a casa?',
+  wa_proposal: 'Ciao {nome}, ti scriviamo per conto di {azienda}. Il tuo {prodotto} (ordine {ordine}) arriverà {data} tra le {inizio} e le {fine}.\nSarai a casa?',
   wa_yes: 'Sì',
   wa_no: 'No',
   wa_confirmed: 'Perfetto, consegna confermata. Ti mandiamo un promemoria il giorno prima.',
   wa_declined: 'Nessun problema. Scegli giorno e fascia oraria che preferisci:\n{link}',
   wa_rescheduled: 'Fatto: la nuova consegna è {data}, {fascia}. A presto!',
   wa_out_area: 'Grazie per averci avvisato. Per il tuo indirizzo la nuova data va concordata con un nostro operatore: ti contatteremo a breve.',
-  mail_subject: 'La tua consegna Vorwerk {ordine}',
+  mail_subject: '{azienda}: la tua consegna {ordine}',
   mail_body: 'Ciao {nome}, il tuo {prodotto} (ordine {ordine}) arriverà a {indirizzo}.',
   mail_question: 'Sarai a casa?',
   mail_yes: 'Sì, confermo',
@@ -26,7 +26,7 @@ export const MESSAGE_DEFAULTS = {
 };
 export type MessageKey = keyof typeof MESSAGE_DEFAULTS;
 export type Messages = Record<MessageKey, string>;
-export const MESSAGE_VARS = ['nome', 'prodotto', 'ordine', 'data', 'inizio', 'fine', 'fascia', 'indirizzo', 'link'] as const;
+export const MESSAGE_VARS = ['azienda', 'nome', 'prodotto', 'ordine', 'data', 'inizio', 'fine', 'fascia', 'indirizzo', 'link'] as const;
 
 /** Sostituisce i campi {nome}, {data}, ... Lascia intatti quelli sconosciuti. */
 export function fillText(template: string, vars: Partial<Record<(typeof MESSAGE_VARS)[number], string>>): string {

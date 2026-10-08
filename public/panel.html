@@ -530,14 +530,14 @@ $('nCap').addEventListener('input', () => {
 
 /* ---------- testi dei messaggi ---------- */
 const MSG_DEFAULT = {
-  wa_proposal: 'Ciao {nome}, sono Vorwerk Consegne. Il tuo {prodotto} (ordine {ordine}) arriverà {data} tra le {inizio} e le {fine}.\nSarai a casa?',
+  wa_proposal: 'Ciao {nome}, ti scriviamo per conto di {azienda}. Il tuo {prodotto} (ordine {ordine}) arriverà {data} tra le {inizio} e le {fine}.\nSarai a casa?',
   wa_yes: 'Sì',
   wa_no: 'No',
   wa_confirmed: 'Perfetto, consegna confermata. Ti mandiamo un promemoria il giorno prima.',
   wa_declined: 'Nessun problema. Scegli giorno e fascia oraria che preferisci:\n{link}',
   wa_rescheduled: 'Fatto: la nuova consegna è {data}, {fascia}. A presto!',
   wa_out_area: 'Grazie per averci avvisato. Per il tuo indirizzo la nuova data va concordata con un nostro operatore: ti contatteremo a breve.',
-  mail_subject: 'La tua consegna Vorwerk {ordine}',
+  mail_subject: '{azienda}: la tua consegna {ordine}',
   mail_body: 'Ciao {nome}, il tuo {prodotto} (ordine {ordine}) arriverà a {indirizzo}.',
   mail_question: 'Sarai a casa?',
   mail_yes: 'Sì, confermo',
@@ -550,12 +550,12 @@ const MSG_DEFAULT = {
   page_note: 'Ordine {ordine} · {indirizzo}. Vedi solo le fasce con posti liberi, aggiornate in tempo reale.',
   page_button: 'Conferma {data}, {fascia}',
 };
-const VARS = {nome:'nome del cliente', prodotto:'prodotto ordinato', ordine:'numero ordine', data:'data di consegna', inizio:'inizio fascia', fine:'fine fascia', fascia:'fascia completa, es. 08:00–11:00', indirizzo:'indirizzo', link:'link per scegliere la data'};
+const VARS = {azienda:'nome della tua azienda', nome:'nome del cliente', prodotto:'prodotto ordinato', ordine:'numero ordine', data:'data di consegna', inizio:'inizio fascia', fine:'fine fascia', fascia:'fascia completa, es. 08:00–11:00', indirizzo:'indirizzo', link:'link per scegliere la data'};
 // st = stato della consegna in cui il testo compare: serve all'anteprima
 const MSG_FIELDS = [
   {g:'WhatsApp', ch:'wa', items:[
-    {k:'wa_proposal', label:'Proposta di consegna', st:'inviato', rows:4, max:1024, hint:'Su WhatsApp vero è un modello approvato da Meta: dopo ogni modifica va fatto riapprovare, di solito in poche ore.'},
-    {k:'wa_yes', label:'Pulsante di conferma', st:'inviato', max:20, novars:true, hint:'Massimo 20 caratteri, limite di WhatsApp.'},
+    {k:'wa_proposal', label:'Proposta di consegna', st:'inviato', rows:4, max:1024, hint:'Su WhatsApp questo primo messaggio è un modello approvato da Meta, uguale per tutte le aziende: il testo inviato è quello del modello, con il nome della tua azienda. Le modifiche qui valgono per l\'anteprima.'},
+    {k:'wa_yes', label:'Pulsante di conferma', st:'inviato', max:20, novars:true, hint:'Massimo 20 caratteri. Su WhatsApp i pulsanti sono quelli del modello approvato: Sì e No.'},
     {k:'wa_no', label:'Pulsante di rifiuto', st:'inviato', max:20, novars:true},
     {k:'wa_confirmed', label:'Risposta dopo la conferma', st:'confermato', rows:2},
     {k:'wa_declined', label:'Risposta dopo il rifiuto', st:'da_riprogrammare', rows:3, req:['link'], hint:'Deve contenere {link}: è il collegamento per scegliere la nuova data.'},
@@ -587,7 +587,7 @@ function T(key, x, which){
   const tpl = src[key] ?? MSG_DEFAULT[key] ?? '';
   const ref = which === 'proposed' && x.proposed ? x.proposed : (x.date ? {date:x.date, bandId:x.bandId} : (x.proposed || {}));
   const b = band(ref.bandId);
-  const v = {nome:x.name.split(' ')[0], prodotto:x.product || 'ordine', ordine:x.code, data:ref.date ? fmtLong(ref.date) : '', inizio:b?.start ?? '', fine:b?.end ?? '', fascia:bandLabel(ref.bandId), indirizzo:x.address};
+  const v = {azienda:me?.tenant_name || '', nome:x.name.split(' ')[0], prodotto:x.product || 'ordine', ordine:x.code, data:ref.date ? fmtLong(ref.date) : '', inizio:b?.start ?? '', fine:b?.end ?? '', fascia:bandLabel(ref.bandId), indirizzo:x.address};
   return esc(tpl).replace(/\{(\w+)\}/g, (m, k) =>
     k === 'link' ? `<button class="lnk" data-pick>${esc(bookingUrl(x))}</button>` : (k in v ? esc(v[k]) : m)
   ).replace(/\n/g, '<br>');
@@ -840,7 +840,7 @@ function renderPhone(){
   if (ui.ch === 'mail'){
     const prop = x.proposed || {date:x.date, bandId:x.bandId};
     s.innerHTML = sbar + `<div class="mail">
-      <div><div class="subj">${P('mail_subject')}</div><div class="from">Vorwerk Consegne &lt;consegne@vorwerk-demo.it&gt;</div></div>
+      <div><div class="subj">${P('mail_subject')}</div><div class="from">${esc(me?.tenant_name || '')}</div></div>
       <p style="margin:0">${P('mail_body')}</p>
       <div class="card"><small class="from">Consegna proposta</small><b>${prop.date ? esc(fmtLong(prop.date)) : ''}, ${bandLabel(prop.bandId)}</b></div>
       ${x.status==='inviato' ? `<p style="margin:0">${P('mail_question')}</p><div class="acts"><button class="btn primary" disabled>${P('mail_yes')}</button><button class="btn" disabled>${P('mail_no')}</button></div>`
@@ -861,7 +861,7 @@ function renderPhone(){
   if (x.status === 'riprogrammato') chat += `<div class="bub">${C('wa_rescheduled')}<time>${nowTime()}</time></div>`;
   if (x.status === 'consegnata') chat += `<div class="sysmsg">Consegna effettuata ✓</div>`;
   if (x.status === 'senza_risposta') chat += `<div class="sysmsg">Nessuna risposta dopo il sollecito: da contattare</div>`;
-  s.innerHTML = sbar + `<div class="chead"><div class="avatar">VK</div><div><b>Vorwerk Consegne</b><small>Account aziendale</small></div></div><div class="chat" id="chat">${chat}</div>`;
+  s.innerHTML = sbar + `<div class="chead"><div class="avatar">✓</div><div><b>Servizio consegne</b><small>Per conto di ${esc(me?.tenant_name || '')}</small></div></div><div class="chat" id="chat">${chat}</div>`;
   const c = $('chat'); c.scrollTop = c.scrollHeight;
 }
 function pickDays(){

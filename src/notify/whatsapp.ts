@@ -4,7 +4,8 @@ import { config } from '../config.js';
 /**
  * Client minimo per WhatsApp Cloud API (Meta).
  * Il template "consegna_proposta" va creato e approvato in WhatsApp Manager, categoria Utility, lingua it:
- *   Corpo:  "Ciao {{1}}, il tuo {{2}} (ordine {{3}}) arriverà {{4}} tra le {{5}}. Sarai a casa?"
+ *   Corpo:  "Ciao {{1}}, ti scriviamo per conto di {{2}}. Il tuo {{3}} (ordine {{4}}) arriverà {{5}} tra le {{6}}. Sarai a casa?"
+ *   {{1}} nome, {{2}} azienda (nome dell'ambiente), {{3}} prodotto, {{4}} ordine, {{5}} data, {{6}} "08:00 e le 11:00".
  *   Pulsanti: due risposte rapide, "Sì" e "No". Il payload di ciascun pulsante lo impostiamo all'invio.
  */
 const endpoint = () => `https://graph.facebook.com/${config.WHATSAPP_API_VERSION}/${config.WHATSAPP_PHONE_NUMBER_ID}/messages`;

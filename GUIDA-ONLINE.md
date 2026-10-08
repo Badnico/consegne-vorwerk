@@ -62,13 +62,35 @@ Su Render apri il servizio `consegne-vorwerk`, poi **Environment**, e aggiungi:
 | `WHATSAPP_ACCESS_TOKEN` | Token di sistema permanente creato in Meta Business |
 | `WHATSAPP_APP_SECRET` | Meta for Developers → la tua app → Impostazioni → Base |
 | `SMTP_URL` | Dal servizio email scelto, nel formato `smtp://utente:password@server:587` |
-| `EMAIL_FROM` | Mittente, es. `Vorwerk Consegne <consegne@tuodominio.it>` |
+| `EMAIL_FROM` | Indirizzo da cui partono le email, es. `Consegne <consegne@tuodominio.it>`. Come nome del mittente il programma mette da solo il nome dell'azienda dell'ambiente |
 
 Poi su Meta registra il webhook `https://<tuo-indirizzo>/webhooks/whatsapp`. Il "verify token" da inserire lo trovi su Render nella variabile `WHATSAPP_VERIFY_TOKEN`.
 
-Il modello WhatsApp `consegna_proposta` va creato e fatto approvare da Meta: istruzioni nel `README.md`.
+WhatsApp ed email sono unici per tutto il sistema: i messaggi di tutti gli ambienti partono dallo stesso numero e dallo stesso indirizzo, e ogni messaggio dice per conto di quale azienda arriva. Nelle email il mittente appare con il nome dell'azienda (es. "Rossi Elettrodomestici") e se il destinatario risponde, la risposta va all'email dell'azienda.
 
-Per ora WhatsApp ed email sono unici per tutto il sistema: i messaggi di tutti gli ambienti partono dallo stesso numero e dallo stesso mittente. Un numero diverso per ogni cliente si può aggiungere in seguito.
+### Il modello WhatsApp da far approvare a Meta
+
+Il primo messaggio (quello con i pulsanti Sì e No) deve essere un modello approvato da Meta. Si crea una volta sola e vale per tutte le aziende.
+
+1. Vai su **business.facebook.com**, apri **WhatsApp Manager**, poi **Modelli di messaggio** → **Crea modello**.
+2. Categoria: **Utilità** (Utility). Nome: `consegna_proposta`. Lingua: **Italiano**.
+3. Corpo del messaggio, copialo esattamente così:
+
+   ```
+   Ciao {{1}}, ti scriviamo per conto di {{2}}. Il tuo {{3}} (ordine {{4}}) arriverà {{5}} tra le {{6}}. Sarai a casa?
+   ```
+
+4. Meta chiede un esempio per ogni variabile. Scrivi:
+   - {{1}} `Mario`
+   - {{2}} `Rossi Elettrodomestici`
+   - {{3}} `Bimby TM7`
+   - {{4}} `A-1024`
+   - {{5}} `giovedì 15 ottobre`
+   - {{6}} `08:00 e le 11:00`
+5. Pulsanti: scegli **Risposta rapida** e aggiungi due pulsanti: `Sì` e `No`.
+6. Niente intestazione e niente piè di pagina. Premi **Invia**. L'approvazione di solito arriva in pochi minuti o qualche ora.
+
+Non cambiare l'ordine delle variabili: il programma le riempie in quest'ordine. Il nome dell'azienda è quello scritto in **Nome dell'azienda** quando crei l'ambiente.
 
 ## Aggiornare il programma
 

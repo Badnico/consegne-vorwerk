@@ -15,6 +15,7 @@ export function messageVars(d: DeliveryView, which: 'proposed' | 'current', link
   const start = which === 'proposed' ? d.proposed_start : d.start_time;
   const end = which === 'proposed' ? d.proposed_end : d.end_time;
   return {
+    azienda: d.tenant_name,
     nome: d.customer_name.split(' ')[0] ?? d.customer_name,
     prodotto: d.product ?? 'ordine',
     ordine: d.order_ref,
@@ -56,6 +57,8 @@ async function deliver(d: DeliveryView, kind: Kind, viaWa: (() => Promise<string
 }
 
 const linkFor = async (d: DeliveryView) => customerUrl(await createToken(pool, d.id, d.date ?? d.proposed_date ?? todayLocal()));
+/** Mittente: nome dell'azienda cliente, indirizzo unico del sistema; le risposte vanno all'email dell'azienda. */
+const sender = (d: DeliveryView) => ({ name: d.tenant_name, replyTo: d.tenant_email });
 const t = (m: Messages, k: keyof Messages, v: Record<string, string>) => fillText(m[k], v);
 
 /** Proposta iniziale (e sollecito). Su WhatsApp usa il modello approvato da Meta con i pulsanti Sì/No. */
@@ -68,7 +71,7 @@ export async function sendProposal(deliveryId: string, kind: 'proposal' | 'remin
   return deliver(
     d,
     kind,
-    () => wa.sendProposalTemplate(d.phone_e164!, [v.nome, v.prodotto, v.ordine, v.data, `${v.inizio} e le ${v.fine}`], `YES:${d.id}`, `NO:${d.id}`),
+    () => wa.sendProposalTemplate(d.phone_e164!, [v.nome, v.azienda, v.prodotto, v.ordine, v.data, `${v.inizio} e le ${v.fine}`], `YES:${d.id}`, `NO:${d.id}`),
     () => {
       const subject = t(m, 'mail_subject', v);
       const text = `${t(m, 'mail_body', v)}\n\nConsegna proposta: ${v.data}, ${v.fascia}\n\n${t(m, 'mail_question', v)}\n${url}\n`;
@@ -78,7 +81,7 @@ export async function sendProposal(deliveryId: string, kind: 'proposal' | 'remin
         para(t(m, 'mail_question', v)) +
         `<p>${button(`${url}?scelta=si`, t(m, 'mail_yes', v))} &nbsp; ${button(`${url}?scelta=no`, t(m, 'mail_no', v), false)}</p>`,
       );
-      return sendEmail(d.email!, subject, text, html);
+      return sendEmail(sender(d), d.email!, subject, text, html);
     },
   );
 }
@@ -93,7 +96,7 @@ export async function sendRescheduleLink(deliveryId: string) {
     d,
     'reschedule_link',
     () => wa.sendText(d.phone_e164!, t(m, 'wa_declined', v)),
-    () => sendEmail(d.email!, t(m, 'mail_subject', v), `${t(m, 'mail_reschedule', v)}\n${url}\n`,
+    () => sendEmail(sender(d), d.email!, t(m, 'mail_subject', v), `${t(m, 'mail_reschedule', v)}\n${url}\n`,
       layout(`<p><strong>${t(m, 'mail_reschedule', v)}</strong></p><p>${button(url, t(m, 'mail_reschedule', v))}</p>`)),
   );
 }
@@ -107,7 +110,7 @@ export async function sendOutOfArea(deliveryId: string) {
     d,
     'out_of_area',
     () => wa.sendText(d.phone_e164!, t(m, 'wa_out_area', v)),
-    () => sendEmail(d.email!, t(m, 'mail_subject', v), t(m, 'mail_out_area', v), layout(para(t(m, 'mail_out_area', v)))),
+    () => sendEmail(sender(d), d.email!, t(m, 'mail_subject', v), t(m, 'mail_out_area', v), layout(para(t(m, 'mail_out_area', v)))),
   );
 }
 
@@ -123,7 +126,7 @@ export async function sendConfirmation(deliveryId: string) {
     () => wa.sendText(d.phone_e164!, t(m, rescheduled ? 'wa_rescheduled' : 'wa_confirmed', v)),
     () => {
       const body = t(m, rescheduled ? 'mail_rescheduled' : 'mail_confirmed', v);
-      return sendEmail(d.email!, t(m, 'mail_subject', v), `${body}\n\n${url}\n`, layout(para(body) + `<p><a href="${url}">Devi cambiarla?</a></p>`));
+      return sendEmail(sender(d), d.email!, t(m, 'mail_subject', v), `${body}\n\n${url}\n`, layout(para(body) + `<p><a href="${url}">Devi cambiarla?</a></p>`));
     },
   );
 }

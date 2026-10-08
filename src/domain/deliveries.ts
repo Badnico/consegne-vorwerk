@@ -16,6 +16,8 @@ export const HOLDS_SEAT: Status[] = ['proposed', 'confirmed', 'rescheduled', 'de
 export interface DeliveryView {
   id: string;
   tenant_id: string;
+  tenant_name: string;
+  tenant_email: string;
   order_ref: string;
   status: Status;
   address: string;
@@ -50,12 +52,13 @@ export interface NewDelivery {
 }
 
 const VIEW_SQL = `
-  SELECT d.id, d.tenant_id, d.order_ref, d.status, d.address, d.cap, d.product, d.customer_id, d.slot_id, d.proposed_slot_id,
+  SELECT d.id, d.tenant_id, t.name AS tenant_name, t.email AS tenant_email, d.order_ref, d.status, d.address, d.cap, d.product, d.customer_id, d.slot_id, d.proposed_slot_id,
          d.reminders_sent, d.failed_attempts, d.delivered_at, d.created_at,
          c.name AS customer_name, c.phone_e164, c.email, c.consent_whatsapp,
          s.date, s.start_time, s.end_time,
          p.date AS proposed_date, p.start_time AS proposed_start, p.end_time AS proposed_end
     FROM deliveries d
+    JOIN tenants t ON t.id = d.tenant_id
     JOIN customers c ON c.id = d.customer_id
     JOIN slots p ON p.id = d.proposed_slot_id
     LEFT JOIN slots s ON s.id = COALESCE(d.slot_id, d.proposed_slot_id)`;
