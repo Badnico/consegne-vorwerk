@@ -5,7 +5,7 @@ import { addDays, hhmm, todayLocal } from '../lib/dates.js';
 import { DomainError } from '../lib/errors.js';
 import { actorOf, requireOperator, tenantOf } from '../lib/auth.js';
 import {
-  bookSlot, createDelivery, deleteDelivery, deliveryEvents, getDelivery, listDeliveries,
+  bookSlot, confirmDelivery, declineDelivery, createDelivery, deleteDelivery, deliveryEvents, getDelivery, listDeliveries,
   markDelivered, markFailedLetCustomerChoose, type DeliveryView, type Status,
 } from '../domain/deliveries.js';
 import { generateSlots, replaceTemplates } from '../domain/slots.js';
@@ -131,9 +131,21 @@ export async function panelRoutes(app: FastifyInstance) {
 
   app.post('/deliveries/:id/book', async (req) => {
     const { id } = idParam.parse(req.params);
-    const b = z.object({ slot_id: z.string().uuid(), failed: z.boolean().optional() }).parse(req.body);
-    await bookSlot(id, b.slot_id, actorOf(req), { failed: b.failed, tenantId: tenantOf(req) });
+    const b = z.object({ slot_id: z.string().uuid(), failed: z.boolean().optional(), asCustomer: z.boolean().optional() }).parse(req.body);
+    // asCustomer: scelta fatta dall'anteprima al posto del cliente, con le sue regole (area, giorni prenotabili)
+    const actor = b.asCustomer ? `customer:pannello (${actorOf(req)})` : actorOf(req);
+    await bookSlot(id, b.slot_id, actor, { failed: b.asCustomer ? false : b.failed, tenantId: tenantOf(req) });
     await enqueue.afterConfirm(id);
+    return toPanel(await getDelivery(pool, id));
+  });
+
+  /** Sì / No dato dall'anteprima al posto del cliente: stessi effetti e messaggi della risposta vera. */
+  app.post('/deliveries/:id/answer', async (req) => {
+    const { id } = idParam.parse(req.params);
+    const { answer } = z.object({ answer: z.enum(['yes', 'no']) }).parse(req.body);
+    const t = tenantOf(req), actor = `customer:pannello (${actorOf(req)})`;
+    if (answer === 'yes') { await confirmDelivery(id, actor, t); await enqueue.afterConfirm(id); }
+    else { await declineDelivery(id, actor, t); await enqueue.afterDecline(id); }
     return toPanel(await getDelivery(pool, id));
   });
 

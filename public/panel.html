@@ -228,6 +228,13 @@ body.solo .screen{height:calc(100dvh - 24px);border-radius:14px;border:1px solid
 @media (prefers-reduced-motion:no-preference){.bub{animation:pop .18s ease-out}@keyframes pop{from{transform:translateY(4px);opacity:.4}}}
 .who{display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
 .linkbox{display:grid;gap:6px}
+.cust{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:12px 14px;display:grid;gap:8px}
+.cust h3{margin:0;font-size:15px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.cust dl{margin:0;display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 12px;font-size:13px}
+.cust dt{color:var(--muted)}
+.cust dd{margin:0;overflow-wrap:anywhere}
+.cust a{color:inherit}
+.askbar{margin-top:10px}
 </style>
 </head>
 <body>
@@ -303,7 +310,7 @@ body.solo .screen{height:calc(100dvh - 24px);border-radius:14px;border:1px solid
             <div class="btngroup"><button class="btn primary" type="submit">Invia messaggio al cliente</button></div>
           </fieldset>
         </form>
-        <p class="note">Il messaggio parte su WhatsApp e/o email in base ai contatti inseriti. Nel prototipo lo vedi comparire nel telefono a destra.</p>
+        <p class="note">Il messaggio parte su WhatsApp e/o email in base ai contatti inseriti. Dopo l'invio trovi a destra i dati del cliente e il messaggio che riceve.</p>
       </div>
 
       <div class="pane" id="p-slot" hidden>
@@ -368,8 +375,10 @@ body.solo .screen{height:calc(100dvh - 24px);border-radius:14px;border:1px solid
           <div class="btngroup"><button class="btn" id="makeLink" type="button">Crea link</button><button class="btn" id="copyUrl" type="button" hidden>Copia link</button></div>
         </div>
       </div>
+      <div class="cust" id="cust" hidden></div>
       <div class="phone"><div class="screen" id="screen"></div></div>
-      <p class="note">È un'anteprima: i pulsanti del cliente qui non fanno nulla. Le risposte arrivano da WhatsApp, dall'email o dal link.</p>
+      <div class="rowpanel askbar" id="askBar" hidden></div>
+      <p class="note">Puoi usare i tasti come se fossi il cliente (per esempio se ti ha risposto al telefono). Funzionano davvero: la consegna cambia stato e il cliente riceve i messaggi. Prima di ogni risposta ti chiediamo conferma.</p>
     </aside>
   </div>
 </div>
@@ -828,12 +837,30 @@ function renderSim(){
   renderPhone();
 }
 function bookingUrl(x){ return ui.links[x.id] || `${location.host}/r/…`; }
+/** Scheda con i dati del cliente della consegna selezionata. */
+function renderCust(){
+  const box = $('cust'), x = deliveries.find(d => d.id === ui.simId);
+  const bar = $('askBar'); if (bar.dataset.id && bar.dataset.id !== ui.simId) bar.hidden = true;
+  if (!x){ box.hidden = true; return; }
+  const row = (k, v) => v ? `<dt>${k}</dt><dd>${v}</dd>` : '';
+  const tel = x.phone ? `<a href="tel:${esc(x.phone)}">${esc(x.phone)}</a>` : '';
+  const mail = x.email ? `<a href="mailto:${esc(x.email)}">${esc(x.email)}</a>` : '';
+  const prop = x.proposed && x.proposed.date ? `${esc(fmtLong(x.proposed.date))}, ${bandLabel(x.proposed.bandId)}` : '';
+  const cur = x.date ? `${esc(fmtLong(x.date))}, ${bandLabel(x.bandId)}` : '';
+  box.innerHTML = `<h3>${esc(x.name)} <span class="pill s-${x.status}"><i class="dot"></i>${STATUS[x.status] || x.status}</span></h3><dl>
+    ${row('Ordine', `<span class="mono">${esc(x.code)}</span>`)}${row('Prodotto', esc(x.product))}
+    ${row('Indirizzo', esc(x.address))}${row('CAP', x.cap ? `<span class="mono">${esc(x.cap)}</span>${area.on && !inArea(x.cap) ? ' · <span class="capout out">fuori area</span>' : ''}` : '')}
+    ${row('WhatsApp', tel)}${row('Email', mail)}
+    ${row('Proposta', prop)}${cur && cur !== prop ? row('Consegna', cur) : ''}</dl>`;
+  box.hidden = false;
+}
 function renderPhone(){
+  renderCust();
   const s = $('screen'), x = deliveries.find(d => d.id === ui.simId);
   const sbar = `<div class="sbar"><span>${nowTime()}</span><span>5G ▮▮▮</span></div>`;
   if (!x){ s.innerHTML = sbar + `<div class="mail"><p class="empty">Crea una consegna per vedere il messaggio che riceve il cliente.</p></div>`; return; }
   if (ui.view === 'pick') return renderPicker(x, sbar);
-  const answered = true; // anteprima: i pulsanti del cliente non sono attivi nel pannello
+  const answered = x.status !== 'inviato';
   const saidNo = x.status === 'da_riprogrammare' || x.status === 'riprogrammato';
   const P = k => T(k, x, 'proposed'), C = k => T(k, x, 'current');
 
@@ -843,7 +870,7 @@ function renderPhone(){
       <div><div class="subj">${P('mail_subject')}</div><div class="from">${esc(me?.tenant_name || '')}</div></div>
       <p style="margin:0">${P('mail_body')}</p>
       <div class="card"><small class="from">Consegna proposta</small><b>${prop.date ? esc(fmtLong(prop.date)) : ''}, ${bandLabel(prop.bandId)}</b></div>
-      ${x.status==='inviato' ? `<p style="margin:0">${P('mail_question')}</p><div class="acts"><button class="btn primary" disabled>${P('mail_yes')}</button><button class="btn" disabled>${P('mail_no')}</button></div>`
+      ${x.status==='inviato' ? `<p style="margin:0">${P('mail_question')}</p><div class="acts"><button class="btn primary" data-ans="yes">${P('mail_yes')}</button><button class="btn" data-ans="no">${P('mail_no')}</button></div>`
         : x.status==='confermato' ? `<div class="card">${C('mail_confirmed')}</div>`
         : x.status==='da_riprogrammare' ? `<div class="card"><b>${C('mail_reschedule')}</b><button class="lnk" data-pick>${bookingUrl(x)}</button></div>`
         : x.status==='fuori_area' ? `<div class="card">${C('mail_out_area')}</div>`
@@ -898,7 +925,7 @@ function renderPicker(x, sbar){
   $('screen').innerHTML = sbar + `<div class="urlbar">🔒 ${esc(bookingUrl(x))}</div><div class="picker" id="pk">
     <div class="pk-head">${ui.asOp ? `<span class="pill s-fuori_area"><i class="dot"></i>${ui.failFor === x.id ? 'Consegna non riuscita: ' : ''}assegni la data per ${esc(x.name)}</span>` : ''}<h3>${T('page_title', x, 'current')}</h3><p>${T('page_note', x, 'current')}</p></div>
     <div class="pk-days">${body}</div>
-    <div class="pk-foot"><p class="err" id="pkErr" hidden></p>${ui.asOp ? `<button class="btn primary" id="pkOk" ${ui.pick&&ui.pick.id&&!ui.busy?'':'disabled'}>${okLabel}</button>` : `<button class="btn primary" disabled>${okLabel}</button>`}<button class="btn ghost" id="pkBack">${ui.asOp ? 'Annulla' : 'Torna al messaggio'}</button></div></div>`;
+    <div class="pk-foot"><p class="err" id="pkErr" hidden></p><button class="btn primary" id="pkOk" ${ui.pick&&ui.pick.id&&!ui.busy?'':'disabled'}>${okLabel}</button><button class="btn ghost" id="pkBack">${ui.asOp ? 'Annulla' : 'Torna al messaggio'}</button></div></div>`;
   const pk = $('pk'); pk.scrollTop = renderPicker.scroll || 0; pk.onscroll = () => renderPicker.scroll = pk.scrollTop;
 }
 
@@ -931,14 +958,39 @@ $('screen').addEventListener('click', async e => {
   if (e.target.closest('#pkBack')){ ui.view='msg'; ui.asOp=false; ui.failFor=null; renderPhone(); return; }
   const sl = e.target.closest('[data-slot]');
   if (sl && !sl.disabled){ const s = ui.avail.find(a => a.id === sl.dataset.slot); if (s) ui.pick = {id:s.id, date:s.date, bandId:s.bandId}; renderPhone(); return; }
-  if (e.target.closest('#pkOk') && ui.pick && ui.pick.id && !ui.busy && ui.asOp){
+  const ans = e.target.closest('[data-ans]');
+  if (ans && !ans.disabled && x.status === 'inviato'){ askAnswer(x, ans.dataset.ans); return; }
+  if (e.target.closest('#pkOk') && ui.pick && ui.pick.id && !ui.busy){
     ui.busy = true; renderPhone();
     try {
-      await api(`/deliveries/${x.id}/book`, {method:'POST', body:{slot_id: ui.pick.id, failed: ui.failFor === x.id}});
+      await api(`/deliveries/${x.id}/book`, {method:'POST', body:{slot_id: ui.pick.id, failed: ui.asOp && ui.failFor === x.id, asCustomer: !ui.asOp}});
+      const byOp = ui.asOp;
       ui.failFor = null; ui.view='msg'; ui.pick=null; ui.asOp=false; ui.busy=false;
-      await load(); toast('Data assegnata e inserita in calendario');
+      await load(); toast(byOp ? 'Data assegnata e inserita in calendario' : 'Scelta del cliente salvata e inserita in calendario');
     } catch(err){ ui.busy=false; await loadAvail(true); renderPhone(); const m=$('pkErr'); if (m){ m.textContent = err.message; m.hidden=false; } }
   }
+});
+
+/* Sì / No al posto del cliente, con conferma */
+function askAnswer(x, a){
+  const bar = $('askBar');
+  const what = a === 'yes'
+    ? `Rispondere <b>Sì</b> al posto di ${esc(x.name)}? La consegna viene confermata e il cliente riceve il messaggio di conferma.`
+    : `Rispondere <b>No</b> al posto di ${esc(x.name)}? Il posto viene liberato e il cliente riceve il link per scegliere un'altra data${area.on ? ' (o il messaggio per chi è fuori area)' : ''}.`;
+  bar.innerHTML = `<span>${what}</span><button class="btn primary" id="askGo">Conferma</button><button class="btn ghost" id="askNo">Annulla</button>`;
+  bar.hidden = false; bar.dataset.id = x.id; bar.dataset.a = a;
+  bar.scrollIntoView({behavior:'smooth', block:'nearest'});
+}
+$('askBar').addEventListener('click', async e => {
+  const bar = $('askBar');
+  if (e.target.closest('#askNo')){ bar.hidden = true; return; }
+  const go = e.target.closest('#askGo'); if (!go) return;
+  go.disabled = true;
+  try {
+    const r = await api(`/deliveries/${bar.dataset.id}/answer`, {method:'POST', body:{answer: bar.dataset.a}});
+    bar.hidden = true; await load();
+    toast(bar.dataset.a === 'yes' ? 'Consegna confermata' : r.status === 'fuori_area' ? 'Cliente fuori area: passato all\'operatore' : 'Posto liberato: ora puoi scegliere la nuova data dal link nel messaggio');
+  } catch (err){ go.disabled = false; toast(err.message); }
 });
 
 $('nDate').addEventListener('change', renderBandSelect);
