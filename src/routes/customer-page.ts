@@ -87,7 +87,7 @@ async function loadAvail() { try { avail = await api('/availability'); render();
 async function act(path, body) {
   busy = true; showErr('');
   try {
-    state = await api(path, body);
+    state = await api(path, body || {}); // sempre POST, anche senza dati (Sì / No)
     if (['to_reschedule', 'rescheduled', 'no_response'].includes(state.status)) { await loadAvail(); startStream(); }
   } catch (e) { const p = document.createElement('p'); p.className = 'err'; p.textContent = e.message; $('#app').append(p); }
   busy = false; pick = null; render();
