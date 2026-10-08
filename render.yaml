@@ -1,0 +1,38 @@
+# Configurazione per Render (render.com) — "Blueprint".
+# Crea un servizio web e un database PostgreSQL a Francoforte (UE).
+# Al primo deploy Render chiede ADMIN_EMAIL e ADMIN_PASSWORD: sono le credenziali del primo amministratore.
+# I piani (dimensione e prezzo) si scelgono nella schermata di riepilogo di Render.
+
+services:
+  - type: web
+    name: consegne-vorwerk
+    runtime: node
+    region: frankfurt
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: TIMEZONE
+        value: Europe/Rome
+      - key: DATABASE_URL
+        fromDatabase:
+          name: consegne-db
+          property: connectionString
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: ADMIN_API_KEY
+        generateValue: true
+      - key: WHATSAPP_VERIFY_TOKEN
+        generateValue: true
+      # Le chiavi di WhatsApp e dell'email si aggiungono dopo, da Environment nel pannello di Render
+      # (vedi GUIDA-ONLINE.md): WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_ACCESS_TOKEN, WHATSAPP_APP_SECRET, SMTP_URL, EMAIL_FROM
+
+databases:
+  - name: consegne-db
+    region: frankfurt
+    databaseName: consegne
+    user: consegne
