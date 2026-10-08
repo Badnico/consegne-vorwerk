@@ -1,11 +1,11 @@
 import Fastify from 'fastify';
 import { ZodError } from 'zod';
 import { DomainError } from './lib/errors.js';
-import { adminRoutes } from './routes/admin.js';
 import { customerRoutes } from './routes/customer.js';
 import { webhookRoutes } from './routes/webhooks.js';
 import { panelRoutes } from './routes/panel.js';
 import { sessionRoutes } from './routes/session.js';
+import { superadminRoutes } from './routes/superadmin.js';
 import { pool } from './lib/db.js';
 
 export function buildApp() {
@@ -34,7 +34,7 @@ export function buildApp() {
 
   app.register(sessionRoutes);
   app.register(panelRoutes, { prefix: '/api/panel' });
-  app.register(adminRoutes, { prefix: '/api' });
+  app.register(superadminRoutes, { prefix: '/api/admin' });
   app.register(customerRoutes);
   app.register(webhookRoutes);
   return app;

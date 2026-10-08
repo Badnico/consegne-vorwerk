@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Amministrazione ambienti</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: intestazione, riepilogo, elenco ambienti a tutta larghezza; creazione e modifica in una finestra sopra l'elenco. */
+:root{
+  --bg:#f3f5f3; --surface:#fff; --sunk:#e9eeea; --line:#d5ddd7; --fg:#18231d; --muted:#5d6b63;
+  --accent:#0b7a4b; --accent-fg:#fff; --accent-soft:#dcefe4;
+  --amber:#a8650a; --amber-soft:#fbecd4; --red:#b3362b; --red-soft:#f8dfdb; --grey:#5d6b63; --grey-soft:#e9eeea;
+  --f-ui:"Public Sans",system-ui,-apple-system,"Segoe UI",sans-serif; --f-mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#111613; --surface:#18201b; --sunk:#202a24; --line:#2e3a33; --fg:#e4ece7; --muted:#9aaba1;
+  --accent:#3fc283; --accent-fg:#0b1a12; --accent-soft:#1d3a2b;
+  --amber:#e7a94a; --amber-soft:#3a2c14; --red:#ef7f73; --red-soft:#3d1f1b; --grey:#9aaba1; --grey-soft:#202a24; color-scheme:dark}}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 var(--f-ui);padding-inline:16px;padding-block:20px 48px}
+h1,h2,h3{margin:0;text-wrap:balance}
+button,input{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.mono{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+.wrap{max-width:1200px;margin:0 auto;display:grid;gap:18px}
+header{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;justify-content:space-between}
+header h1{font-size:22px}
+header p{margin:4px 0 0;color:var(--muted)}
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:6px;padding:8px 14px;font-weight:600;cursor:pointer}
+.btn:hover{background:var(--sunk)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
+.btn.danger{background:var(--red);border-color:var(--red);color:#fff}
+.btn.ghost{border-color:transparent;background:none}
+.btn:disabled{opacity:.55;cursor:not-allowed}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.summary{display:flex;flex-wrap:wrap;gap:8px}
+.chip{display:inline-flex;align-items:center;gap:8px;padding:6px 12px;border-radius:999px;background:var(--surface);border:1px solid var(--line);font-size:13px}
+.chip b{font-family:var(--f-mono);font-weight:500}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--c)}
+.st-active{--c:var(--accent);--cs:var(--accent-soft)} .st-soon{--c:var(--amber);--cs:var(--amber-soft)}
+.st-expired{--c:var(--red);--cs:var(--red-soft)} .st-suspended{--c:var(--grey);--cs:var(--grey-soft)}
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:2px 8px;border-radius:999px;background:var(--cs);color:var(--c);white-space:nowrap}
+.toolbar{display:flex;flex-wrap:wrap;gap:10px;justify-content:space-between;align-items:center}
+.search{flex:0 1 320px;min-width:0;border:1px solid var(--line);border-radius:6px;padding:8px 12px;background:var(--surface)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.scroll{overflow-x:auto}
+table{width:100%;border-collapse:collapse;min-width:860px}
+th,td{text-align:left;padding:12px 14px;border-bottom:1px solid var(--line);vertical-align:middle}
+th{font-size:12px;color:var(--muted);font-weight:600;background:var(--sunk)}
+tr:last-child td{border-bottom:0}
+td small{display:block;color:var(--muted)}
+td a{color:var(--accent);font-family:var(--f-mono);font-size:12px;text-decoration:none}
+td a:hover{text-decoration:underline}
+.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+.empty{padding:40px 16px;text-align:center;color:var(--muted)}
+.empty b{display:block;color:var(--fg);font-size:16px;margin-bottom:4px}
+dialog{border:1px solid var(--line);border-radius:14px;padding:0;background:var(--surface);color:var(--fg);width:min(560px,calc(100% - 32px));max-height:calc(100dvh - 32px)}
+dialog::backdrop{background:rgba(10,20,15,.45)}
+.dlg{display:grid;gap:16px;padding:22px}
+.dlg h2{font-size:18px}
+.fields{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.fields .full{grid-column:1/-1}
+@media (max-width:560px){.fields{grid-template-columns:1fr}}
+label.f{display:grid;gap:5px;font-size:12px;font-weight:600;color:var(--muted);min-width:0}
+label.f input{font-size:14px;font-weight:400;color:var(--fg);background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:9px 11px;width:100%;min-width:0}
+label.f small{font-weight:400}
+.slugbox{display:flex;align-items:center;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.slugbox span{padding:9px 0 9px 11px;color:var(--muted);font-family:var(--f-mono);font-size:12px;white-space:nowrap;max-width:55%;overflow:hidden;text-overflow:ellipsis}
+.slugbox input{border:0!important;border-radius:0!important;font-family:var(--f-mono);font-size:13px!important;padding-left:2px!important}
+.inline{display:flex;gap:6px}
+.inline input{flex:1}
+.quick{display:flex;flex-wrap:wrap;gap:6px}
+.quick button{border:1px dashed var(--line);background:none;border-radius:999px;padding:3px 10px;font-size:12px;font-weight:600;cursor:pointer;color:var(--muted)}
+.quick button:hover{border-color:var(--accent);color:var(--accent)}
+.err{margin:0;color:var(--red);background:var(--red-soft);border-radius:6px;padding:9px 12px;font-weight:600;font-size:13px}
+.cred{background:var(--accent-soft);border-radius:10px;padding:14px;display:grid;gap:6px}
+.cred dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:4px 12px}
+.cred dt{color:var(--muted);font-size:12px;font-weight:600}
+.cred dd{margin:0;font-family:var(--f-mono);font-size:13px;word-break:break-all}
+.danger-zone{border-top:1px solid var(--line);padding-top:14px;display:grid;gap:8px}
+.danger-zone p{margin:0;font-size:13px;color:var(--muted)}
+.foot{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end}
+.toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:10px 16px;border-radius:8px;font-weight:600;font-size:13px;z-index:10;max-width:calc(100% - 32px)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div><h1>Ambienti dei clienti</h1><p>Ogni ambiente ha il suo indirizzo, i suoi dati e il suo abbonamento.</p></div>
+    <div class="row"><button class="btn primary" id="newBtn" type="button">Nuovo ambiente</button><button class="btn" id="logout" type="button">Esci</button></div>
+  </header>
+
+  <div class="summary" id="summary"></div>
+
+  <div class="toolbar">
+    <input class="search" id="q" type="search" placeholder="Cerca cliente, utente o email" aria-label="Cerca">
+  </div>
+
+  <div class="card"><div class="scroll"><table>
+    <thead><tr><th>Cliente</th><th>Utente</th><th>Email</th><th>Abbonamento</th><th>Consegne attive / totali</th><th>Ultimo accesso</th><th></th></tr></thead>
+    <tbody id="rows"><tr><td colspan="7" class="empty">Caricamento…</td></tr></tbody>
+  </table></div></div>
+</div>
+
+<!-- Nuovo ambiente -->
+<dialog id="dNew" aria-labelledby="dNewT">
+  <form class="dlg" id="fNew" novalidate method="dialog">
+    <h2 id="dNewT">Nuovo ambiente</h2>
+    <div class="fields">
+      <label class="f full">Nome dell'azienda<input id="nName" required placeholder="Es. Rossi Elettrodomestici"></label>
+      <label class="f full">Indirizzo del sito
+        <div class="slugbox"><span id="nBase"></span><input id="nSlug" required spellcheck="false" autocapitalize="off"></div>
+        <small>Lettere minuscole, numeri e trattini.</small></label>
+      <label class="f">Utente<input id="nUser" required autocomplete="off" spellcheck="false" autocapitalize="off"></label>
+      <label class="f">Password
+        <span class="inline"><input id="nPass" required autocomplete="new-password" spellcheck="false"><button class="btn" type="button" data-gen="nPass">Genera</button></span></label>
+      <label class="f full">Email<input id="nMail" type="email" required placeholder="referente@azienda.it"></label>
+      <label class="f full">Fine abbonamento<input id="nEnd" type="date" required>
+        <span class="quick" data-for="nEnd"><button type="button" data-m="1">+1 mese</button><button type="button" data-m="3">+3 mesi</button><button type="button" data-m="6">+6 mesi</button><button type="button" data-m="12">+1 anno</button></span>
+        <small>L'accesso resta attivo fino a questo giorno compreso.</small></label>
+    </div>
+    <p class="err" id="nErr" hidden></p>
+    <div class="foot"><button class="btn ghost" type="button" data-close>Annulla</button><button class="btn primary" type="submit" id="nGo">Crea ambiente</button></div>
+  </form>
+</dialog>
+
+<!-- Credenziali appena create -->
+<dialog id="dCred" aria-labelledby="dCredT">
+  <div class="dlg">
+    <h2 id="dCredT">Ambiente pronto</h2>
+    <div class="cred">
+      <dl><dt>Indirizzo</dt><dd id="cUrl"></dd><dt>Utente</dt><dd id="cUser"></dd><dt>Password</dt><dd id="cPass"></dd><dt>Valido fino al</dt><dd id="cEnd"></dd></dl>
+    </div>
+    <p style="margin:0;color:var(--muted);font-size:13px">La password non verrà più mostrata: copiala ora e mandala al cliente in modo sicuro.</p>
+    <div class="foot"><button class="btn" type="button" id="cCopy">Copia tutto</button><button class="btn primary" type="button" data-close>Fatto</button></div>
+  </div>
+</dialog>
+
+<!-- Modifica -->
+<dialog id="dEdit" aria-labelledby="dEditT">
+  <form class="dlg" id="fEdit" novalidate method="dialog">
+    <div><h2 id="dEditT">Modifica ambiente</h2><p style="margin:4px 0 0" class="mono" id="eUrl"></p></div>
+    <div class="fields">
+      <label class="f full">Nome dell'azienda<input id="eName" required></label>
+      <label class="f">Utente<input id="eUser" autocomplete="off" spellcheck="false" autocapitalize="off"></label>
+      <label class="f">Nuova password
+        <span class="inline"><input id="ePass" autocomplete="new-password" spellcheck="false" placeholder="Lascia vuoto per non cambiarla"><button class="btn" type="button" data-gen="ePass">Genera</button></span></label>
+      <label class="f full">Email<input id="eMail" type="email" required></label>
+      <label class="f full">Fine abbonamento<input id="eEnd" type="date" required>
+        <span class="quick" data-for="eEnd"><button type="button" data-m="1">+1 mese</button><button type="button" data-m="3">+3 mesi</button><button type="button" data-m="6">+6 mesi</button><button type="button" data-m="12">+1 anno</button></span>
+        <small>I rinnovi si sommano dalla scadenza attuale, o da oggi se è già passata.</small></label>
+    </div>
+    <div class="row"><label class="row" style="gap:8px;font-weight:600"><input type="checkbox" id="eSusp"> Sospendi l'accesso (indipendentemente dalla scadenza)</label></div>
+    <p class="err" id="eErr" hidden></p>
+    <div class="foot"><button class="btn ghost" type="button" data-close>Annulla</button><button class="btn primary" type="submit" id="eGo">Salva</button></div>
+    <div class="danger-zone">
+      <p>Eliminare l'ambiente cancella per sempre consegne, impostazioni e utente. Per confermare scrivi l'indirizzo <b class="mono" id="eSlugTxt"></b>.</p>
+      <div class="inline"><input id="eDel" class="search" style="flex:1" spellcheck="false" autocapitalize="off" aria-label="Indirizzo da confermare"><button class="btn danger" type="button" id="eDelGo" disabled>Elimina</button></div>
+    </div>
+  </form>
+</dialog>
+
+<div class="toast" id="toast" hidden></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const pad = (n) => String(n).padStart(2, '0');
+const iso = (d) => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const today = () => iso(new Date());
+const parse = (s) => { const [y,m,d] = s.split('-').map(Number); return new Date(y, m-1, d); };
+const fmt = (s) => parse(s).toLocaleDateString('it-IT', { day:'numeric', month:'short', year:'numeric' });
+const daysLeft = (s) => Math.round((parse(s) - parse(today())) / 864e5);
+const addMonths = (s, n) => { const d = parse(s); const day = d.getDate(); d.setMonth(d.getMonth() + n); if (d.getDate() < day) d.setDate(0); return iso(d); };
+let data = { base:'', tenants:[] }, editing = null, q = '';
+
+function toast(m){ const t = $('toast'); t.textContent = m; t.hidden = false; clearTimeout(toast.h); toast.h = setTimeout(() => t.hidden = true, 2800); }
+async function api(path, opts = {}){
+  const r = await fetch('/api/admin' + path, { method: opts.method || (opts.body ? 'POST' : 'GET'),
+    headers: opts.body ? {'content-type':'application/json'} : {}, body: opts.body ? JSON.stringify(opts.body) : undefined });
+  if (r.status === 401){ location.href = '/admin/login'; throw new Error('Sessione scaduta'); }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.message || 'Operazione non riuscita.');
+  return j;
+}
+
+/** Stato mostrato: attivo, in scadenza (entro 14 giorni), scaduto, sospeso */
+function state(t){
+  if (t.suspended) return { k:'suspended', label:'Sospeso' };
+  const n = daysLeft(t.subscription_end);
+  if (n < 0) return { k:'expired', label:'Scaduto' };
+  if (n <= 14) return { k:'soon', label: n === 0 ? 'Scade oggi' : n === 1 ? 'Scade domani' : `Scade tra ${n} giorni` };
+  return { k:'active', label:'Attivo' };
+}
+
+function render(){
+  const T = data.tenants, s = T.map(state);
+  const count = (k) => s.filter((x) => x.k === k).length;
+  $('summary').innerHTML = [['active','Attivi'],['soon','In scadenza'],['expired','Scaduti'],['suspended','Sospesi']]
+    .map(([k,l]) => `<span class="chip st-${k}"><i class="dot"></i>${l} <b>${count(k)}</b></span>`).join('');
+  const ql = q.trim().toLowerCase();
+  const list = T.filter((t) => !ql || [t.name, t.slug, t.username, t.email].some((v) => String(v||'').toLowerCase().includes(ql)));
+  if (!T.length){ $('rows').innerHTML = `<tr><td colspan="7" class="empty"><b>Nessun ambiente</b>Crea il primo con "Nuovo ambiente": il cliente riceve indirizzo, utente e password.</td></tr>`; return; }
+  if (!list.length){ $('rows').innerHTML = `<tr><td colspan="7" class="empty">Nessun ambiente corrisponde alla ricerca.</td></tr>`; return; }
+  $('rows').innerHTML = list.map((t) => {
+    const st = state(t), url = `${data.base}/${t.slug}/`;
+    return `<tr>
+      <td><b>${esc(t.name)}</b><a href="${esc(url)}" target="_blank" rel="noopener">${esc(url.replace(/^https?:\/\//,''))}</a></td>
+      <td class="mono">${t.username ? esc(t.username) : '<span class="pill st-soon"><i class="dot"></i>Da creare</span>'}</td>
+      <td>${esc(t.email)}</td>
+      <td><span class="pill st-${st.k}"><i class="dot"></i>${st.label}</span><small>fino al ${fmt(t.subscription_end)}</small></td>
+      <td class="num">${t.active_deliveries} / ${t.deliveries}</td>
+      <td>${t.last_login ? new Date(t.last_login).toLocaleDateString('it-IT',{day:'numeric',month:'short'}) : '<small>mai</small>'}</td>
+      <td><button class="btn" data-edit="${t.id}" type="button">Modifica</button></td>
+    </tr>`;
+  }).join('');
+}
+async function load(){ try { data = await api('/tenants'); $('nBase').textContent = data.base.replace(/^https?:\/\//,'') + '/'; render(); } catch (e) { toast(e.message); } }
+
+/* ---------- utilità dei moduli ---------- */
+function genPassword(){
+  const a = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789', out = [];
+  const v = crypto.getRandomValues(new Uint32Array(14));
+  for (const x of v) out.push(a[x % a.length]);
+  return out.join('');
+}
+document.addEventListener('click', (e) => {
+  const g = e.target.closest('[data-gen]'); if (g){ $(g.dataset.gen).value = genPassword(); $(g.dataset.gen).dispatchEvent(new Event('input')); return; }
+  const m = e.target.closest('.quick [data-m]');
+  if (m){
+    // Nuovo ambiente: da oggi. Rinnovo: dalla scadenza attuale, o da oggi se è già passata.
+    const inp = $(m.parentElement.dataset.for), current = editing?.subscription_end;
+    const startFrom = inp.id === 'eEnd' && current && current > today() ? current : today();
+    inp.value = addMonths(startFrom, +m.dataset.m); return;
+  }
+  const c = e.target.closest('[data-close]'); if (c){ c.closest('dialog').close(); return; }
+  const ed = e.target.closest('[data-edit]'); if (ed) openEdit(ed.dataset.edit);
+});
+const showErr = (id, m) => { $(id).textContent = m; $(id).hidden = !m; };
+
+/* ---------- nuovo ambiente ---------- */
+let slugTouched = false;
+$('newBtn').onclick = () => {
+  $('fNew').reset(); slugTouched = false; showErr('nErr', '');
+  $('nEnd').value = addMonths(today(), 12);
+  $('dNew').showModal(); $('nName').focus();
+};
+const slugify = (s) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+$('nName').addEventListener('input', () => { if (!slugTouched) $('nSlug').value = slugify($('nName').value); if (!$('nUser').dataset.touched) $('nUser').value = slugify($('nName').value).split('-')[0] || ''; });
+$('nSlug').addEventListener('input', () => { slugTouched = true; $('nSlug').value = $('nSlug').value.toLowerCase().replace(/[^a-z0-9-]/g, ''); });
+$('nUser').addEventListener('input', () => { $('nUser').dataset.touched = '1'; });
+$('fNew').addEventListener('submit', async (e) => {
+  e.preventDefault(); showErr('nErr', '');
+  const b = { name:$('nName').value.trim(), slug:$('nSlug').value.trim(), username:$('nUser').value.trim(), password:$('nPass').value, email:$('nMail').value.trim(), subscription_end:$('nEnd').value };
+  if (!b.name || !b.slug || !b.username || !b.password || !b.email || !b.subscription_end) return showErr('nErr', 'Compila tutti i campi.');
+  $('nGo').disabled = true;
+  try {
+    await api('/tenants', { body:b });
+    $('dNew').close();
+    $('cUrl').textContent = `${data.base}/${b.slug}/`; $('cUser').textContent = b.username; $('cPass').textContent = b.password; $('cEnd').textContent = fmt(b.subscription_end);
+    $('dCred').showModal();
+    await load();
+  } catch (ex) { showErr('nErr', ex.message); }
+  $('nGo').disabled = false;
+});
+$('cCopy').onclick = async () => {
+  const t = `Indirizzo: ${$('cUrl').textContent}\nUtente: ${$('cUser').textContent}\nPassword: ${$('cPass').textContent}\nValido fino al: ${$('cEnd').textContent}`;
+  try { await navigator.clipboard.writeText(t); toast('Credenziali copiate'); } catch { toast('Copia non riuscita: seleziona il testo a mano'); }
+};
+
+/* ---------- modifica ---------- */
+function openEdit(id){
+  const t = data.tenants.find((x) => x.id === id); if (!t) return;
+  editing = t; showErr('eErr', '');
+  $('dEditT').textContent = t.name; $('eUrl').textContent = `${data.base}/${t.slug}/`.replace(/^https?:\/\//,'');
+  $('eName').value = t.name; $('eUser').value = t.username || ''; $('ePass').value = '';
+  $('ePass').placeholder = t.username ? 'Lascia vuoto per non cambiarla' : 'Obbligatoria per creare l\'utente';
+  $('eMail').value = t.email; $('eEnd').value = t.subscription_end; $('eSusp').checked = t.suspended;
+  $('eSlugTxt').textContent = t.slug; $('eDel').value = ''; $('eDelGo').disabled = true;
+  $('dEdit').showModal();
+}
+$('eDel').addEventListener('input', () => { $('eDelGo').disabled = $('eDel').value.trim() !== editing?.slug; });
+$('fEdit').addEventListener('submit', async (e) => {
+  e.preventDefault(); showErr('eErr', '');
+  const t = editing, b = {};
+  if ($('eName').value.trim() !== t.name) b.name = $('eName').value.trim();
+  if ($('eMail').value.trim() !== t.email) b.email = $('eMail').value.trim();
+  if ($('eUser').value.trim() && $('eUser').value.trim() !== (t.username || '')) b.username = $('eUser').value.trim();
+  if ($('ePass').value) b.password = $('ePass').value;
+  if ($('eEnd').value !== t.subscription_end) b.subscription_end = $('eEnd').value;
+  if ($('eSusp').checked !== t.suspended) b.suspended = $('eSusp').checked;
+  if (!Object.keys(b).length){ $('dEdit').close(); return; }
+  $('eGo').disabled = true;
+  try {
+    await api(`/tenants/${t.id}`, { method:'PATCH', body:b });
+    $('dEdit').close();
+    if (b.password){ $('cUrl').textContent = `${data.base}/${t.slug}/`; $('cUser').textContent = b.username || t.username; $('cPass').textContent = b.password; $('cEnd').textContent = fmt(b.subscription_end || t.subscription_end); $('dCredT').textContent = 'Nuove credenziali'; $('dCred').showModal(); }
+    else toast('Ambiente aggiornato');
+    await load();
+  } catch (ex) { showErr('eErr', ex.message); }
+  $('eGo').disabled = false;
+});
+$('eDelGo').onclick = async () => {
+  const t = editing; $('eDelGo').disabled = true;
+  try { await api(`/tenants/${t.id}`, { method:'DELETE', body:{ confirm:$('eDel').value.trim() } }); $('dEdit').close(); toast(`Ambiente ${t.name} eliminato`); await load(); }
+  catch (ex) { showErr('eErr', ex.message); $('eDelGo').disabled = false; }
+};
+
+$('q').addEventListener('input', (e) => { q = e.target.value; render(); });
+$('logout').onclick = async () => { try { await fetch('/api/admin/logout', { method:'POST' }); } finally { location.href = '/admin/login'; } };
+$('dCred').addEventListener('close', () => { $('dCredT').textContent = 'Ambiente pronto'; });
+load();
+</script>
+</body>
+</html>

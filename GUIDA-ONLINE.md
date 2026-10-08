@@ -20,13 +20,30 @@ Tempo: circa 30 minuti. Non serve il terminale: si fa tutto dal browser.
 3. Collega GitHub e scegli il repository `consegne-vorwerk`.
 4. Render legge il file `render.yaml` e propone due elementi: il servizio web `consegne-vorwerk` e il database `consegne-db`, entrambi a Francoforte.
 5. Ti chiede due valori:
-   - **ADMIN_EMAIL**: la tua email, con cui entrerai nel pannello.
+   - **ADMIN_EMAIL**: la tua email, con cui entrerai nel pannello amministratore.
    - **ADMIN_PASSWORD**: una password lunga, almeno 12 caratteri. Conservala.
 6. Controlla i piani proposti per il servizio e il database e scegli quelli a pagamento più piccoli: i piani gratuiti si spengono quando non sono usati e il database gratuito scade dopo un periodo limitato.
 7. Premi **Apply** (o **Deploy Blueprint**). Il primo avvio richiede qualche minuto.
-8. Quando il servizio è **Live**, in alto trovi l'indirizzo, del tipo `https://consegne-vorwerk.onrender.com`. Aprilo e accedi con l'email e la password del punto 5.
+8. Quando il servizio è **Live**, in alto trovi l'indirizzo, del tipo `https://consegne-vorwerk.onrender.com`. Aprilo: arrivi su `/admin`. Accedi con l'email e la password del punto 5.
 
-## 3. Prima configurazione nel pannello
+## 3. Crea gli ambienti dei clienti
+
+Nel pannello amministratore (`/admin`) premi **Nuovo ambiente** e compila:
+
+- **Nome dell'azienda** e **indirizzo del sito**: il cliente userà `https://consegne-vorwerk.onrender.com/<indirizzo>/`.
+- **Utente** e **password** (con **Genera** ne crei una sicura).
+- **Email** del referente.
+- **Fine abbonamento**: fino a quel giorno compreso il cliente può entrare. Dal giorno dopo l'accesso al suo pannello si blocca da solo; i link già mandati ai suoi destinatari continuano a funzionare.
+
+Alla fine compaiono indirizzo, utente e password da copiare e mandare al cliente. La password non viene più mostrata: se si perde, da **Modifica** ne imposti una nuova.
+
+Da **Modifica** puoi anche rinnovare l'abbonamento (+1 mese, +3, +6, +1 anno), sospendere l'accesso o eliminare l'ambiente.
+
+Se avevi già usato la versione precedente, i dati esistenti si trovano nell'ambiente **vorwerk**: aprilo con **Modifica** e assegnagli utente e password.
+
+## 4. Prima configurazione nell'ambiente di un cliente
+
+Il cliente (o tu, entrando con le sue credenziali) imposta:
 
 1. **Slot e capienza**: controlla fasce, numero di consegne per fascia e giorni attivi.
 2. **Area servita**: inserisci i CAP in cui il cliente può scegliere da solo la data.
@@ -35,7 +52,7 @@ Tempo: circa 30 minuti. Non serve il terminale: si fa tutto dal browser.
 
 Finché WhatsApp ed email non sono collegati, i messaggi non partono. Puoi comunque premere **Crea link** nell'anteprima e mandare il link al cliente a mano.
 
-## 4. Collegare WhatsApp ed email (quando sono pronti)
+## 5. Collegare WhatsApp ed email (quando sono pronti)
 
 Su Render apri il servizio `consegne-vorwerk`, poi **Environment**, e aggiungi:
 
@@ -50,6 +67,8 @@ Su Render apri il servizio `consegne-vorwerk`, poi **Environment**, e aggiungi:
 Poi su Meta registra il webhook `https://<tuo-indirizzo>/webhooks/whatsapp`. Il "verify token" da inserire lo trovi su Render nella variabile `WHATSAPP_VERIFY_TOKEN`.
 
 Il modello WhatsApp `consegna_proposta` va creato e fatto approvare da Meta: istruzioni nel `README.md`.
+
+Per ora WhatsApp ed email sono unici per tutto il sistema: i messaggi di tutti gli ambienti partono dallo stesso numero e dallo stesso mittente. Un numero diverso per ogni cliente si può aggiungere in seguito.
 
 ## Aggiornare il programma
 

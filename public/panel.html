@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="robots" content="noindex">
-<title>Consegne Vorwerk</title>
+<title>Gestione consegne</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
@@ -234,7 +234,7 @@ body.solo .screen{height:calc(100dvh - 24px);border-radius:14px;border:1px solid
 <div class="wrap">
   <header class="top">
     <div>
-      <h1>Consegne Vorwerk</h1>
+      <h1>Gestione consegne</h1>
       <p>Proponi data e fascia, segui le risposte dei clienti e chiudi le consegne della giornata.</p>
     </div>
     <div class="topacts">
@@ -408,10 +408,11 @@ const sorted = arr => [...arr].sort((a,b) => String((a.date||a.proposed?.date||'
 function toast(msg){ const t = $('toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast.h); toast.h = setTimeout(() => t.hidden = true, 2600); }
 
 /* ---------- dati: API del server ---------- */
+const LOGIN = '/' + (location.pathname.split('/').filter(Boolean)[0] || '') + '/login';
 async function api(path, opts = {}){
   const r = await fetch('/api/panel' + path, { method: opts.method || (opts.body ? 'POST' : 'GET'),
     headers: opts.body ? {'content-type':'application/json'} : {}, body: opts.body ? JSON.stringify(opts.body) : undefined, credentials:'same-origin' });
-  if (r.status === 401){ location.href = '/login'; throw new Error('Sessione scaduta: accedi di nuovo.'); }
+  if (r.status === 401){ location.href = LOGIN; throw new Error('Sessione scaduta: accedi di nuovo.'); }
   if (r.status === 204) return null;
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j.message || 'Operazione non riuscita. Riprova.');
@@ -465,7 +466,7 @@ $('copyUrl').onclick = async () => {
   try { await navigator.clipboard.writeText(t); toast('Link copiato'); }
   catch { const r = document.createRange(); r.selectNodeContents($('shareUrl')); const s = getSelection(); s.removeAllRanges(); s.addRange(r); toast('Link selezionato: copialo con Ctrl+C'); }
 };
-$('logout').onclick = async () => { try { await fetch('/api/logout', {method:'POST'}); } finally { location.href = '/login'; } };
+$('logout').onclick = async () => { try { await fetch('/api/logout', {method:'POST'}); } finally { location.href = LOGIN; } };
 
 /* ---------- area servita (CAP) ---------- */
 let area = {on:false, list:''}, areaDirty = false;
@@ -982,7 +983,7 @@ $('saveSlots').onclick = async () => {
 };
 
 renderMsgEditor(); renderAll();
-fetch('/api/me').then(r => r.ok ? r.json() : null).then(m => { me = m; if (m) $('who').textContent = m.name + ' · ' + m.email; });
+fetch('/api/me').then(r => r.ok ? r.json() : null).then(m => { me = m; if (!m) return; $('who').textContent = `${m.tenant_name} · ${m.username} · abbonamento fino al ${parse(m.subscription_end).toLocaleDateString('it-IT',{day:'numeric',month:'short',year:'numeric'})}`; document.title = m.tenant_name + ' · Consegne'; });
 load();
 setInterval(() => { if (document.visibilityState === 'visible' && !ui.busy) load(); }, 15000);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') load(); });

@@ -62,7 +62,7 @@ const t = (m: Messages, k: keyof Messages, v: Record<string, string>) => fillTex
 export async function sendProposal(deliveryId: string, kind: 'proposal' | 'reminder' = 'proposal') {
   const d = await getDelivery(pool, deliveryId);
   if (d.status !== 'proposed') return null; // già risposto: niente invio
-  const m = await getMessages(pool);
+  const m = await getMessages(pool, d.tenant_id);
   const url = await linkFor(d);
   const v = messageVars(d, 'proposed', url);
   return deliver(
@@ -86,7 +86,7 @@ export async function sendProposal(deliveryId: string, kind: 'proposal' | 'remin
 /** Dopo un "No" dentro l'area. Su WhatsApp il cliente ha appena scritto: la finestra di 24 ore è aperta. */
 export async function sendRescheduleLink(deliveryId: string) {
   const d = await getDelivery(pool, deliveryId);
-  const m = await getMessages(pool);
+  const m = await getMessages(pool, d.tenant_id);
   const url = await linkFor(d);
   const v = messageVars(d, 'current', url);
   return deliver(
@@ -101,7 +101,7 @@ export async function sendRescheduleLink(deliveryId: string) {
 /** Dopo un "No" fuori dall'area servita: niente link, lo contatterà un operatore. */
 export async function sendOutOfArea(deliveryId: string) {
   const d = await getDelivery(pool, deliveryId);
-  const m = await getMessages(pool);
+  const m = await getMessages(pool, d.tenant_id);
   const v = messageVars(d, 'current');
   return deliver(
     d,
@@ -113,7 +113,7 @@ export async function sendOutOfArea(deliveryId: string) {
 
 export async function sendConfirmation(deliveryId: string) {
   const d = await getDelivery(pool, deliveryId);
-  const m = await getMessages(pool);
+  const m = await getMessages(pool, d.tenant_id);
   const url = await linkFor(d);
   const v = messageVars(d, 'current', url);
   const rescheduled = d.status === 'rescheduled';

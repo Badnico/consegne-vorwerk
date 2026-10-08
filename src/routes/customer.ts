@@ -15,7 +15,7 @@ const params = z.object({ token: z.string() });
 
 /** Solo ciò che serve al cliente: niente telefono, email o storico. Testi già compilati con i suoi dati. */
 async function publicView(d: DeliveryView) {
-  const m = await getMessages(pool);
+  const m = await getMessages(pool, d.tenant_id);
   const cur = messageVars(d, 'current'), prop = messageVars(d, 'proposed');
   const f = (k: keyof typeof m, v = cur) => fillText(m[k], v);
   return {
@@ -88,8 +88,8 @@ export async function customerRoutes(app: FastifyInstance) {
   app.get('/r/:token/availability', async (req, reply) => {
     const { token } = params.parse(req.params);
     const d = await getDelivery(pool, await resolveToken(pool, token));
-    const { from, to } = await bookingWindow(pool);
-    const slots = await availability(pool, from, to);
+    const { from, to } = await bookingWindow(pool, d.tenant_id);
+    const slots = await availability(pool, d.tenant_id, from, to);
     noStore(reply);
     return {
       from,

@@ -77,24 +77,24 @@ export function inArea(area: AreaSetting, cap: string | null | undefined): boole
 
 export interface BookingSetting { horizon: number; lead: number }
 
-/* ---------- accesso ---------- */
+/* ---------- accesso (per ambiente) ---------- */
 
-async function get<T>(db: Db, key: string, fallback: T): Promise<T> {
-  const r = await db.query<{ value: T }>('SELECT value FROM settings WHERE key = $1', [key]);
+async function get<T>(db: Db, tenantId: string, key: string, fallback: T): Promise<T> {
+  const r = await db.query<{ value: T }>('SELECT value FROM settings WHERE tenant_id = $1 AND key = $2', [tenantId, key]);
   return r.rows[0] ? { ...fallback, ...r.rows[0].value } : fallback;
 }
-async function put(db: Db, key: string, value: unknown) {
+async function put(db: Db, tenantId: string, key: string, value: unknown) {
   await db.query(
-    `INSERT INTO settings (key, value) VALUES ($1, $2)
-     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
-    [key, JSON.stringify(value)],
+    `INSERT INTO settings (tenant_id, key, value) VALUES ($1, $2, $3)
+     ON CONFLICT (tenant_id, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+    [tenantId, key, JSON.stringify(value)],
   );
 }
 
-export const getMessages = (db: Db) => get<Messages>(db, 'messages', { ...MESSAGE_DEFAULTS });
-export const saveMessages = (db: Db, m: Messages) => put(db, 'messages', m);
-export const getArea = (db: Db) => get<AreaSetting>(db, 'area', { ...AREA_DEFAULT });
-export const saveArea = (db: Db, a: AreaSetting) => put(db, 'area', a);
-export const getBooking = (db: Db) =>
-  get<BookingSetting>(db, 'booking', { horizon: config.BOOKING_HORIZON_DAYS, lead: config.BOOKING_LEAD_DAYS });
-export const saveBooking = (db: Db, b: BookingSetting) => put(db, 'booking', b);
+export const getMessages = (db: Db, t: string) => get<Messages>(db, t, 'messages', { ...MESSAGE_DEFAULTS });
+export const saveMessages = (db: Db, t: string, m: Messages) => put(db, t, 'messages', m);
+export const getArea = (db: Db, t: string) => get<AreaSetting>(db, t, 'area', { ...AREA_DEFAULT });
+export const saveArea = (db: Db, t: string, a: AreaSetting) => put(db, t, 'area', a);
+export const getBooking = (db: Db, t: string) =>
+  get<BookingSetting>(db, t, 'booking', { horizon: config.BOOKING_HORIZON_DAYS, lead: config.BOOKING_LEAD_DAYS });
+export const saveBooking = (db: Db, t: string, b: BookingSetting) => put(db, t, 'booking', b);

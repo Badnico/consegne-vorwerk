@@ -1,26 +1,31 @@
-import { pool, tx } from './db.js';
+import { pool } from './db.js';
 import { migrate } from './migrate.js';
-import { availability, bookingWindow, generateSlots, replaceTemplates } from '../domain/slots.js';
+import { ensureAdmin } from './auth.js';
+import { addDays, todayLocal } from './dates.js';
+import { availability, bookingWindow, generateSlots } from '../domain/slots.js';
 import { createDelivery } from '../domain/deliveries.js';
 import { createToken, customerUrl } from '../domain/tokens.js';
+import { createTenant, getTenantBySlug } from '../domain/tenants.js';
 import { formatDateIt, hhmm } from './dates.js';
 
 /**
- * Crea una consegna di prova nel primo slot libero e stampa il link del cliente.
+ * Crea una consegna di prova nell'ambiente indicato (default "demo") e stampa il link del cliente.
  * Serve per provare il flusso senza WhatsApp né email configurati.
+ * Uso: npm run demo -- [nome cliente] [ambiente]
  */
 await migrate();
-const hasTemplates = (await pool.query('SELECT 1 FROM slot_templates WHERE active LIMIT 1')).rowCount;
-if (!hasTemplates) {
-  const bands = [['08:00', '11:00', 6], ['11:00', '14:00', 5], ['14:00', '17:00', 6], ['17:00', '20:00', 4]] as const;
-  await tx(async (c) => {
-    await replaceTemplates(c, [1, 2, 3, 4, 5, 6].flatMap((weekday) => bands.map(([s, e, cap]) => ({ weekday, start_time: s, end_time: e, capacity: cap }))));
-  });
+await ensureAdmin((m) => console.log(m));
+const slug = process.argv[3] ?? 'demo';
+let tenant = await getTenantBySlug(pool, slug);
+if (!tenant && slug === 'demo') {
+  await createTenant({ name: 'Demo', slug: 'demo', username: 'demo', password: 'consegne-locale', email: 'demo@example.it', subscription_end: addDays(todayLocal(), 365) });
+  tenant = await getTenantBySlug(pool, slug);
 }
-await generateSlots(pool);
+if (!tenant) { console.log(`Ambiente "${slug}" non trovato.`); process.exit(1); }
+await generateSlots(pool, tenant.id);
 
-const { from, to } = await bookingWindow(pool);
-const slot = (await availability(pool, from, to)).find((s) => s.free > 0);
+const { from, to } = await bookingWindow(pool, tenant.id);
+const slot = (await availability(pool, tenant.id, from, to)).find((s) => s.free > 0);
 if (!slot) {
   console.log('Nessuno slot libero nei prossimi giorni: controlla le fasce.');
   process.exit(1);
@@ -28,6 +33,7 @@ if (!slot) {
 
 const name = process.argv[2] ?? 'Marco Bellini';
 const id = await createDelivery(
+  tenant.id,
   {
     order_ref: `DEMO-${Date.now().toString().slice(-6)}`,
     customer: { name, email: 'cliente.demo@example.it' },

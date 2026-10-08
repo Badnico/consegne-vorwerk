@@ -4,44 +4,59 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex">
-<title>Accesso · Consegne Vorwerk</title>
+<title>Accesso · Gestione consegne</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;600;700&display=swap">
 <style>
-:root{--bg:#f3f5f3;--surface:#fff;--line:#d5ddd7;--fg:#18231d;--muted:#5d6b63;--accent:#0b7a4b;--accent-fg:#fff;--red:#b3362b;color-scheme:light}
-@media (prefers-color-scheme:dark){:root{--bg:#111613;--surface:#18201b;--line:#2e3a33;--fg:#e4ece7;--muted:#9aaba1;--accent:#3fc283;--accent-fg:#0b1a12;--red:#ef7f73;color-scheme:dark}}
+:root{--bg:#f3f5f3;--surface:#fff;--line:#d5ddd7;--fg:#18231d;--muted:#5d6b63;--accent:#0b7a4b;--accent-fg:#fff;--red:#b3362b;--red-soft:#f8dfdb;color-scheme:light}
+@media (prefers-color-scheme:dark){:root{--bg:#111613;--surface:#18201b;--line:#2e3a33;--fg:#e4ece7;--muted:#9aaba1;--accent:#3fc283;--accent-fg:#0b1a12;--red:#ef7f73;--red-soft:#3d1f1b;color-scheme:dark}}
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--fg);font:15px/1.5 "Public Sans",system-ui,-apple-system,"Segoe UI",sans-serif;padding:24px 16px}
 form{width:100%;max-width:380px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:28px 24px;display:grid;gap:16px}
-h1{margin:0;font-size:20px}
-p{margin:0;color:var(--muted);font-size:14px}
+h1{margin:0;font-size:20px;text-wrap:balance}
+.sub{margin:4px 0 0;color:var(--muted);font-size:14px}
 label{display:grid;gap:6px;font-size:13px;font-weight:600;color:var(--muted)}
 input{font:inherit;color:var(--fg);background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:10px 12px}
 input:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 button{font:inherit;font-weight:700;border:0;border-radius:6px;padding:11px 14px;background:var(--accent);color:var(--accent-fg);cursor:pointer}
 button:disabled{opacity:.6;cursor:wait}
-.err{color:var(--red);font-weight:600}
+.err{margin:0;color:var(--red);background:var(--red-soft);border-radius:6px;padding:10px 12px;font-size:14px;font-weight:600}
 </style>
 </head>
 <body>
 <form id="f" novalidate>
-  <div><h1>Consegne Vorwerk</h1><p>Accedi al pannello operatori.</p></div>
-  <label>Email<input id="email" type="email" autocomplete="username" required></label>
+  <div><h1 id="title">Gestione consegne</h1><p class="sub" id="sub">Accedi al pannello.</p></div>
+  <label><span id="userLabel">Utente</span><input id="user" autocomplete="username" required></label>
   <label>Password<input id="password" type="password" autocomplete="current-password" required></label>
   <p class="err" id="err" hidden></p>
   <button id="go" type="submit">Accedi</button>
 </form>
 <script>
-const f = document.getElementById('f'), err = document.getElementById('err'), go = document.getElementById('go');
-f.addEventListener('submit', async (e) => {
-  e.preventDefault(); err.hidden = true; go.disabled = true;
+// /admin/login → superamministratore; /<ambiente>/login → pannello del cliente
+const seg = location.pathname.split('/').filter(Boolean)[0] || '';
+const isAdmin = seg === 'admin';
+const $ = (id) => document.getElementById(id);
+if (isAdmin) {
+  $('title').textContent = 'Amministrazione';
+  $('sub').textContent = 'Gestisci gli ambienti dei tuoi clienti.';
+  $('userLabel').textContent = 'Email';
+  $('user').type = 'email';
+} else {
+  fetch('/api/tenant/' + encodeURIComponent(seg)).then((r) => r.ok ? r.json() : null).then((t) => {
+    if (t) { $('title').textContent = t.name; document.title = 'Accesso · ' + t.name; }
+  }).catch(() => {});
+}
+$('f').addEventListener('submit', async (e) => {
+  e.preventDefault(); $('err').hidden = true; $('go').disabled = true;
+  const user = $('user').value.trim(), password = $('password').value;
   try {
-    const r = await fetch('/api/login', { method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ email: document.getElementById('email').value, password: document.getElementById('password').value }) });
+    const r = await fetch(isAdmin ? '/api/admin/login' : '/api/login', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(isAdmin ? { email: user, password } : { tenant: seg, username: user, password }) });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j.message || 'Accesso non riuscito.');
-    location.href = '/';
-  } catch (ex) { err.textContent = ex.message; err.hidden = false; go.disabled = false; }
+    location.href = isAdmin ? '/admin' : '/' + seg + '/';
+  } catch (ex) { $('err').textContent = ex.message; $('err').hidden = false; $('go').disabled = false; }
 });
 </script>
 </body>

@@ -3,12 +3,25 @@ import { promisify } from 'node:util';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { config } from '../config.js';
 import { pool } from './db.js';
+import { todayLocal } from './dates.js';
 
 const scrypt = promisify(scryptCb) as (pw: string, salt: Buffer, len: number) => Promise<Buffer>;
 const SESSION_DAYS = 14;
-export const COOKIE = 'sid';
+/** Due cookie distinti: puoi essere dentro come amministratore e come cliente nello stesso browser */
+export const COOKIE = { tenant: 'sid', admin: 'asid' } as const;
+type Kind = keyof typeof COOKIE;
 
-export interface Operator { id: string; email: string; name: string; role: 'admin' | 'operator' }
+export interface Operator {
+  id: string;
+  username: string;
+  email: string;
+  name: string;
+  role: 'superadmin' | 'admin' | 'operator';
+  tenant_id: string | null;
+  tenant_slug: string | null;
+  tenant_name: string | null;
+  subscription_end: string | null;
+}
 
 export async function hashPassword(pw: string): Promise<string> {
   const salt = randomBytes(16);
@@ -21,54 +34,83 @@ export async function verifyPassword(pw: string, stored: string): Promise<boolea
   if (algo !== 'scrypt' || !salt || !key) return false;
   const expected = Buffer.from(key, 'base64');
   const got = await scrypt(pw, Buffer.from(salt, 'base64'), expected.length);
-  return timingSafeEqual(got, expected);
+  return got.length === expected.length && timingSafeEqual(got, expected);
 }
 
 const sha = (t: string) => createHash('sha256').update(t).digest();
+const DUMMY_HASH = 'scrypt$AAAAAAAAAAAAAAAAAAAAAA==$' + 'A'.repeat(88);
 
 /**
- * Al primo avvio crea l'amministratore da ADMIN_EMAIL e ADMIN_PASSWORD.
+ * Al primo avvio crea il superamministratore (tu) da ADMIN_EMAIL e ADMIN_PASSWORD.
  * In locale, senza variabili, crea un utente di prova e lo scrive nel log.
  */
 export async function ensureAdmin(log: (m: string) => void) {
-  const n = (await pool.query<{ n: number }>('SELECT count(*)::int AS n FROM operators')).rows[0]!.n;
+  const n = (await pool.query<{ n: number }>(`SELECT count(*)::int AS n FROM operators WHERE role = 'superadmin'`)).rows[0]!.n;
   if (n > 0) return;
   let email = config.ADMIN_EMAIL, password = config.ADMIN_PASSWORD;
   if (!email || !password) {
     if (process.env.RENDER || process.env.NODE_ENV === 'production') {
-      log('ATTENZIONE: nessun operatore e ADMIN_EMAIL/ADMIN_PASSWORD non impostati: impossibile accedere al pannello.');
+      log('ATTENZIONE: ADMIN_EMAIL/ADMIN_PASSWORD non impostati: impossibile accedere a /admin.');
       return;
     }
     email = 'admin@example.it';
     password = 'consegne-locale';
-    log(`Utente di prova creato: ${email} / ${password} (solo in locale)`);
+    log(`Superamministratore di prova: ${email} / ${password} (solo in locale)`);
   }
-  await pool.query('INSERT INTO operators (email, name, password_hash, role) VALUES ($1, $2, $3, $4)', [
-    email.toLowerCase(), 'Amministratore', await hashPassword(password), 'admin',
+  await pool.query(`INSERT INTO operators (email, username, name, password_hash, role) VALUES ($1, $1, $2, $3, 'superadmin')`, [
+    email.toLowerCase(), 'Amministratore', await hashPassword(password),
   ]);
-  log(`Amministratore creato: ${email}`);
+  log(`Superamministratore creato: ${email}`);
 }
 
-export async function login(email: string, password: string): Promise<{ token: string; operator: Operator } | null> {
-  const r = await pool.query<Operator & { password_hash: string }>(
-    'SELECT id, email, name, role, password_hash FROM operators WHERE email = $1',
-    [email.trim().toLowerCase()],
+export type LoginResult =
+  | { ok: true; token: string; operator: Operator }
+  | { ok: false; reason: 'invalid' | 'expired' | 'suspended'; until?: string };
+
+const OP_SQL = `
+  SELECT o.id, o.username, o.email, o.name, o.role, o.tenant_id, o.password_hash,
+         t.slug AS tenant_slug, t.name AS tenant_name, t.subscription_end, t.suspended
+    FROM operators o LEFT JOIN tenants t ON t.id = o.tenant_id`;
+
+async function startSession(operatorId: string) {
+  const token = randomBytes(32).toString('base64url');
+  await pool.query(`INSERT INTO sessions (token_hash, operator_id, expires_at) VALUES ($1, $2, now() + interval '${SESSION_DAYS} days')`, [sha(token), operatorId]);
+  await pool.query('DELETE FROM sessions WHERE expires_at < now()');
+  return token;
+}
+const strip = ({ password_hash: _h, suspended: _s, ...op }: Operator & { password_hash: string; suspended: boolean | null }) => op as Operator;
+
+/** Accesso all'ambiente di un cliente: utente + password, bloccato se l'abbonamento è scaduto o sospeso. */
+export async function loginTenant(slug: string, username: string, password: string): Promise<LoginResult> {
+  const r = await pool.query<Operator & { password_hash: string; suspended: boolean }>(
+    `${OP_SQL} WHERE t.slug = $1 AND lower(o.username) = lower($2)`,
+    [slug.toLowerCase(), username.trim()],
   );
   const row = r.rows[0];
-  // Verifica comunque una password per non rivelare, dai tempi di risposta, se l'email esiste
-  const ok = await verifyPassword(password, row?.password_hash ?? 'scrypt$AAAAAAAAAAAAAAAAAAAAAA==$' + 'A'.repeat(88));
-  if (!row || !ok) return null;
-  const token = randomBytes(32).toString('base64url');
-  await pool.query(`INSERT INTO sessions (token_hash, operator_id, expires_at) VALUES ($1, $2, now() + interval '${SESSION_DAYS} days')`, [sha(token), row.id]);
-  await pool.query('DELETE FROM sessions WHERE expires_at < now()');
-  return { token, operator: { id: row.id, email: row.email, name: row.name, role: row.role } };
+  const ok = await verifyPassword(password, row?.password_hash ?? DUMMY_HASH);
+  if (!row || !ok) return { ok: false, reason: 'invalid' };
+  if (row.suspended) return { ok: false, reason: 'suspended' };
+  if (row.subscription_end! < todayLocal()) return { ok: false, reason: 'expired', until: row.subscription_end! };
+  return { ok: true, token: await startSession(row.id), operator: strip(row) };
+}
+
+/** Accesso del superamministratore: email + password. */
+export async function loginAdmin(email: string, password: string): Promise<LoginResult> {
+  const r = await pool.query<Operator & { password_hash: string; suspended: boolean }>(
+    `${OP_SQL} WHERE o.role = 'superadmin' AND lower(o.email) = lower($1)`,
+    [email.trim()],
+  );
+  const row = r.rows[0];
+  const ok = await verifyPassword(password, row?.password_hash ?? DUMMY_HASH);
+  if (!row || !ok) return { ok: false, reason: 'invalid' };
+  return { ok: true, token: await startSession(row.id), operator: strip(row) };
 }
 
 export async function logout(token: string) {
   await pool.query('DELETE FROM sessions WHERE token_hash = $1', [sha(token)]);
 }
 
-export function readCookie(req: FastifyRequest, name = COOKIE): string | null {
+export function readCookie(req: FastifyRequest, name: string): string | null {
   const raw = req.headers.cookie ?? '';
   for (const part of raw.split(';')) {
     const [k, ...v] = part.trim().split('=');
@@ -77,47 +119,57 @@ export function readCookie(req: FastifyRequest, name = COOKIE): string | null {
   return null;
 }
 
-export async function sessionOperator(req: FastifyRequest): Promise<Operator | null> {
-  const token = readCookie(req);
+/**
+ * Operatore della sessione. Per gli ambienti dei clienti l'abbonamento viene ricontrollato a ogni richiesta:
+ * appena scade (o viene sospeso) l'accesso si chiude anche per chi è già dentro.
+ */
+export async function sessionOperator(req: FastifyRequest, kind: Kind): Promise<Operator | null> {
+  const token = readCookie(req, COOKIE[kind]);
   if (!token) return null;
-  const r = await pool.query<Operator>(
-    `SELECT o.id, o.email, o.name, o.role FROM sessions s JOIN operators o ON o.id = s.operator_id
-      WHERE s.token_hash = $1 AND s.expires_at > now()`,
+  const r = await pool.query<Operator & { password_hash: string; suspended: boolean }>(
+    `${OP_SQL} JOIN sessions s ON s.operator_id = o.id WHERE s.token_hash = $1 AND s.expires_at > now()`,
     [sha(token)],
   );
-  return r.rows[0] ?? null;
+  const row = r.rows[0];
+  if (!row) return null;
+  if (kind === 'admin') return row.role === 'superadmin' ? strip(row) : null;
+  if (!row.tenant_id || row.suspended || row.subscription_end! < todayLocal()) return null;
+  return strip(row);
 }
 
 const secure = () => config.PUBLIC_BASE_URL.startsWith('https://');
-export function setSessionCookie(reply: FastifyReply, token: string) {
-  reply.header('Set-Cookie', `${COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_DAYS * 86400}${secure() ? '; Secure' : ''}`);
+export function setSessionCookie(reply: FastifyReply, kind: Kind, token: string) {
+  reply.header('Set-Cookie', `${COOKIE[kind]}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_DAYS * 86400}${secure() ? '; Secure' : ''}`);
 }
-export function clearSessionCookie(reply: FastifyReply) {
-  reply.header('Set-Cookie', `${COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure() ? '; Secure' : ''}`);
-}
-
-function apiKeyOk(header: string | undefined) {
-  if (!header?.startsWith('Bearer ')) return false;
-  const given = Buffer.from(header.slice(7));
-  const expected = Buffer.from(config.ADMIN_API_KEY);
-  return given.length === expected.length && timingSafeEqual(given, expected);
+export function clearSessionCookie(reply: FastifyReply, kind: Kind) {
+  reply.header('Set-Cookie', `${COOKIE[kind]}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure() ? '; Secure' : ''}`);
 }
 
-/**
- * Accesso alle API operatori: sessione del pannello oppure chiave API (per integrazioni, es. import da Vorwerk).
- * Per le richieste che modificano dati con la sessione, l'origine deve essere lo stesso sito.
- */
+/** Le richieste che modificano dati devono arrivare da una pagina dello stesso sito. */
+function sameOrigin(req: FastifyRequest) {
+  if (req.method === 'GET' || req.method === 'HEAD') return true;
+  const origin = req.headers.origin ?? req.headers.referer;
+  try { return Boolean(origin) && new URL(origin!).host === req.headers.host; } catch { return false; }
+}
+
+type WithOp = FastifyRequest & { operator?: Operator };
+
+/** API del pannello di un ambiente: sessione valida e abbonamento attivo. */
 export async function requireOperator(req: FastifyRequest, reply: FastifyReply) {
-  if (apiKeyOk(req.headers.authorization)) { (req as FastifyRequest & { operator?: Operator }).operator = { id: 'api', email: 'api', name: 'API', role: 'admin' }; return; }
-  const op = await sessionOperator(req);
-  if (!op) return reply.code(401).send({ error: 'unauthorized', message: 'Accesso richiesto.' });
-  if (req.method !== 'GET' && req.method !== 'HEAD') {
-    const origin = req.headers.origin ?? req.headers.referer;
-    let host: string | null = null;
-    try { host = origin ? new URL(origin).host : null; } catch { host = null; }
-    if (!host || host !== req.headers.host) return reply.code(403).send({ error: 'forbidden', message: 'Richiesta non consentita.' });
-  }
-  (req as FastifyRequest & { operator?: Operator }).operator = op;
+  const op = await sessionOperator(req, 'tenant');
+  if (!op) return reply.code(401).send({ error: 'unauthorized', message: 'Accesso richiesto o abbonamento non attivo.' });
+  if (!sameOrigin(req)) return reply.code(403).send({ error: 'forbidden', message: 'Richiesta non consentita.' });
+  (req as WithOp).operator = op;
 }
 
-export const actorOf = (req: FastifyRequest) => `operator:${(req as FastifyRequest & { operator?: Operator }).operator?.email ?? '?'}`;
+/** API del superamministratore. */
+export async function requireSuperadmin(req: FastifyRequest, reply: FastifyReply) {
+  const op = await sessionOperator(req, 'admin');
+  if (!op) return reply.code(401).send({ error: 'unauthorized', message: 'Accesso richiesto.' });
+  if (!sameOrigin(req)) return reply.code(403).send({ error: 'forbidden', message: 'Richiesta non consentita.' });
+  (req as WithOp).operator = op;
+}
+
+export const operatorOf = (req: FastifyRequest) => (req as WithOp).operator!;
+export const tenantOf = (req: FastifyRequest) => (req as WithOp).operator!.tenant_id!;
+export const actorOf = (req: FastifyRequest) => `operator:${(req as WithOp).operator?.username ?? '?'}`;

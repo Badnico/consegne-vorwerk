@@ -1,19 +1,16 @@
-import { pool, tx } from './db.js';
+import { pool } from './db.js';
 import { migrate } from './migrate.js';
-import { generateSlots, replaceTemplates } from '../domain/slots.js';
+import { ensureAdmin } from './auth.js';
+import { addDays, todayLocal } from './dates.js';
+import { createTenant, getTenantBySlug } from '../domain/tenants.js';
 
-/** Fasce di esempio: lunedì-sabato, quattro fasce con capienze diverse. */
-const bands = [
-  { start_time: '08:00', end_time: '11:00', capacity: 6 },
-  { start_time: '11:00', end_time: '14:00', capacity: 5 },
-  { start_time: '14:00', end_time: '17:00', capacity: 6 },
-  { start_time: '17:00', end_time: '20:00', capacity: 4 },
-];
-
+/** Solo in locale: crea il superamministratore e un ambiente di prova "demo" con fasce standard. */
 await migrate();
-const r = await tx(async (c) => {
-  await replaceTemplates(c, [1, 2, 3, 4, 5, 6].flatMap((weekday) => bands.map((b) => ({ weekday, ...b }))));
-  return generateSlots(c);
-});
-console.log(`Fasce di esempio salvate, ${r.generated} slot generati`);
+await ensureAdmin((m) => console.log(m));
+if (await getTenantBySlug(pool, 'demo')) {
+  console.log('Ambiente "demo" già presente: http://localhost:3000/demo/ (utente demo / consegne-locale)');
+} else {
+  await createTenant({ name: 'Demo', slug: 'demo', username: 'demo', password: 'consegne-locale', email: 'demo@example.it', subscription_end: addDays(todayLocal(), 365) });
+  console.log('Ambiente "demo" creato: http://localhost:3000/demo/ (utente demo / consegne-locale)');
+}
 await pool.end();

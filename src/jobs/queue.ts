@@ -2,7 +2,7 @@ import PgBoss from 'pg-boss';
 import { config } from '../config.js';
 import { pool } from '../lib/db.js';
 import { getDelivery, incrementReminders, markNoResponse, type Status } from '../domain/deliveries.js';
-import { generateSlots } from '../domain/slots.js';
+import { activeTenantIds, generateSlots } from '../domain/slots.js';
 import { sendConfirmation, sendOutOfArea, sendProposal, sendRescheduleLink } from '../notify/notifier.js';
 
 /**
@@ -88,8 +88,10 @@ async function registerWorkers(b: PgBoss) {
   });
 
   await b.work(Q.slots, async () => {
-    const r = await generateSlots(pool);
-    if (r.overbooked.length) console.warn(`[slots] ${r.overbooked.length} slot oltre capienza`, r.overbooked);
+    for (const t of await activeTenantIds(pool)) {
+      const r = await generateSlots(pool, t);
+      if (r.overbooked.length) console.warn(`[slots] ambiente ${t}: ${r.overbooked.length} slot oltre capienza`);
+    }
   });
   await b.schedule(Q.slots, '15 2 * * *', {}, { tz: config.TIMEZONE });
 }

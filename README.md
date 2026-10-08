@@ -10,12 +10,13 @@ Sistema per proporre data e fascia di consegna, raccogliere Sì/No via WhatsApp 
 cp .env.example .env          # compila le chiavi quando le hai
 docker compose up -d          # Postgres 16 su localhost:5432
 npm install
-npm run seed                  # schema + fasce di esempio lun–sab, 4 fasce al giorno
-npm run dev                   # pannello su http://localhost:3000 (in locale: admin@example.it / consegne-locale)
-npm run demo                  # in un secondo terminale: crea una consegna di prova e stampa il link cliente
+npm run seed                  # superamministratore + ambiente di prova "demo"
+npm run dev                   # http://localhost:3000/admin (admin@example.it / consegne-locale)
+                              # http://localhost:3000/demo/  (demo / consegne-locale)
+npm run demo                  # in un secondo terminale: crea una consegna di prova in "demo" e stampa il link cliente
 ```
 
-Per un link cliente di una consegna esistente: `POST /api/deliveries/:id/link`.
+Per un link cliente di una consegna esistente: pulsante **Crea link** nel pannello.
 
 Senza chiavi WhatsApp e SMTP il sistema funziona, ma i job di invio falliscono e vengono ritentati: utile per provare i flussi dalle API.
 
@@ -40,7 +41,10 @@ src/domain/tokens.ts        link personali: token casuale, solo hash nel DB, sca
 src/notify/                 WhatsApp Cloud API, email SMTP, Notifier con ripiego su email
 src/jobs/queue.ts           invio proposta, sollecito, link dopo il No, conferma, scadenza, slot notturni
 src/lib/live.ts             LISTEN/NOTIFY di Postgres → Server-Sent Events per le pagine cliente
-src/routes/admin.ts         API operatori (/api/...)
+src/routes/session.ts       accessi e pagine: /admin, /<ambiente>/, login
+src/routes/superadmin.ts    API del pannello amministratore (/api/admin/...)
+src/routes/panel.ts         API del pannello di un ambiente (/api/panel/...)
+src/domain/tenants.ts       ambienti: creazione, rinnovo, sospensione, eliminazione
 src/routes/customer.ts      link cliente (/r/:token/...)
 src/routes/customer-page.ts pagina cliente senza dipendenze
 src/routes/webhooks.ts      webhook WhatsApp (firma HMAC, deduplica) ed email
@@ -59,11 +63,15 @@ Se due richieste arrivano insieme sull'ultimo posto, Postgres le serializza sull
 
 Una proposta in attesa occupa già il posto. Il No lo libera subito. Una nuova scelta occupa il nuovo posto prima di liberare il vecchio, quindi se il nuovo è pieno non cambia nulla.
 
+## Ambienti (più clienti)
+
+Ogni azienda cliente ha un ambiente separato con indirizzo `/<ambiente>/`, utente e password, dati, fasce, area e testi propri, e una data di fine abbonamento. Il superamministratore li gestisce da `/admin` (crea, rinnova, sospendi, cambia password, elimina). Con abbonamento scaduto o sospeso il pannello del cliente si chiude subito, anche per chi è già dentro; i link dei destinatari restano attivi. Tutte le query sono filtrate per `tenant_id`; i test verificano che un ambiente non veda né modifichi i dati di un altro.
+
 ## Pannello operatori
 
-`/` dopo il login (`/login`): calendario, consegne con filtri ed esito (consegnata, non consegnata, elimina), nuova consegna, slot e capienza, area servita per CAP, testi dei messaggi, anteprima di ciò che vede il cliente e link personale con QR. Usa le API sotto `/api/panel`.
+`/<ambiente>/` dopo il login (`/<ambiente>/login`): calendario, consegne con filtri ed esito (consegnata, non consegnata, elimina), nuova consegna, slot e capienza, area servita per CAP, testi dei messaggi, anteprima di ciò che vede il cliente e link personale con QR. Usa le API sotto `/api/panel`.
 
-Il primo amministratore nasce da `ADMIN_EMAIL` e `ADMIN_PASSWORD` al primo avvio.
+Il superamministratore (`/admin`) nasce da `ADMIN_EMAIL` e `ADMIN_PASSWORD` al primo avvio.
 
 ## Area servita
 
@@ -71,28 +79,7 @@ Se il cliente risponde No e il suo CAP è nell'area (CAP singoli, intervalli `20
 
 ## API per integrazioni
 
-Autenticazione: sessione del pannello oppure `Authorization: Bearer $ADMIN_API_KEY` (per un import automatico da Vorwerk).
-
-| Metodo | Percorso | Cosa fa |
-| --- | --- | --- |
-| POST | `/api/deliveries` | Crea una consegna (con `slot_id` oppure `date` + `start_time`) e accoda il messaggio |
-| POST | `/api/deliveries/import` | CSV (`text/csv`): `order_ref,name,phone_e164,email,consent_whatsapp,address,product,date,start_time` |
-| GET | `/api/deliveries?from=&to=&status=` | Lista |
-| GET | `/api/deliveries/:id` | Dettaglio con storico e messaggi |
-| POST | `/api/deliveries/:id/resend` | Reinvia proposta o link |
-| POST | `/api/deliveries/:id/confirm` · `/decline` · `/book` | Azioni per conto del cliente |
-| GET | `/api/calendar?from=&to=` | Slot con capienza, occupati e consegne |
-| GET · PUT | `/api/slot-templates` | Fasce ricorrenti; il PUT rigenera gli slot e segnala quelli oltre capienza |
-| PUT | `/api/slot-overrides/:date` | Eccezioni per una data (`capacity: 0` chiude la fascia) |
-
-Esempio:
-
-```bash
-curl -X POST localhost:3000/api/deliveries \
-  -H "Authorization: Bearer $ADMIN_API_KEY" -H 'content-type: application/json' \
-  -d '{"order_ref":"VK-24817","customer":{"name":"Marco Bellini","phone_e164":"+393470000002","consent_whatsapp":true},
-       "address":"Corso Lodi 45, Milano","product":"Thermomix TM7","date":"2026-10-12","start_time":"08:00"}'
-```
+Le API dell'ambiente (`/api/panel/...`) usano la sessione del pannello. Un'API con chiave per ambiente, per importare gli ordini in automatico, è da aggiungere quando servirà.
 
 ## Configurare WhatsApp
 
