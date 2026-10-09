@@ -44,11 +44,16 @@ const DUMMY_HASH = 'scrypt$AAAAAAAAAAAAAAAAAAAAAA==$' + 'A'.repeat(88);
  * Al primo avvio crea il superamministratore (tu) da ADMIN_EMAIL e ADMIN_PASSWORD.
  * In locale, senza variabili, crea un utente di prova e lo scrive nel log.
  */
+/**
+ * Superamministratore da ADMIN_EMAIL / ADMIN_PASSWORD (variabili su Render).
+ * A ogni avvio: se l'utente con quell'email non c'è lo crea, se la password è cambiata la aggiorna.
+ * Così, se dimentichi la password, basta cambiarla su Render e riavviare.
+ */
 export async function ensureAdmin(log: (m: string) => void) {
-  const n = (await pool.query<{ n: number }>(`SELECT count(*)::int AS n FROM operators WHERE role = 'superadmin'`)).rows[0]!.n;
-  if (n > 0) return;
-  let email = config.ADMIN_EMAIL, password = config.ADMIN_PASSWORD;
+  let email = config.ADMIN_EMAIL?.trim().toLowerCase(), password = config.ADMIN_PASSWORD;
   if (!email || !password) {
+    const n = (await pool.query<{ n: number }>(`SELECT count(*)::int AS n FROM operators WHERE role = 'superadmin'`)).rows[0]!.n;
+    if (n > 0) return;
     if (process.env.RENDER || process.env.NODE_ENV === 'production') {
       log('ATTENZIONE: ADMIN_EMAIL/ADMIN_PASSWORD non impostati: impossibile accedere a /admin.');
       return;
@@ -57,10 +62,20 @@ export async function ensureAdmin(log: (m: string) => void) {
     password = 'consegne-locale';
     log(`Superamministratore di prova: ${email} / ${password} (solo in locale)`);
   }
-  await pool.query(`INSERT INTO operators (email, username, name, password_hash, role) VALUES ($1, $1, $2, $3, 'superadmin')`, [
-    email.toLowerCase(), 'Amministratore', await hashPassword(password),
-  ]);
-  log(`Superamministratore creato: ${email}`);
+  const r = await pool.query<{ id: string; password_hash: string }>(
+    `SELECT id, password_hash FROM operators WHERE role = 'superadmin' AND lower(email) = $1`, [email],
+  );
+  const row = r.rows[0];
+  if (!row) {
+    await pool.query(`INSERT INTO operators (email, username, name, password_hash, role) VALUES ($1, $1, $2, $3, 'superadmin')`, [
+      email, 'Amministratore', await hashPassword(password),
+    ]);
+    log(`Superamministratore creato: ${email}`);
+  } else if (!(await verifyPassword(password, row.password_hash))) {
+    await pool.query('UPDATE operators SET password_hash = $1 WHERE id = $2', [await hashPassword(password), row.id]);
+    await pool.query('DELETE FROM sessions WHERE operator_id = $1', [row.id]);
+    log(`Password del superamministratore ${email} aggiornata da ADMIN_PASSWORD`);
+  }
 }
 
 export type LoginResult =

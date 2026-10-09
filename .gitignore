@@ -1,4 +1,8 @@
 node_modules/
+node_modules*/
 dist/
 .env
 *.log
+# copie create da Windows (es. "file - Copia.txt")
+* - Copia*
+* - Copy*
