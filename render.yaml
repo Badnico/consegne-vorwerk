@@ -5,7 +5,7 @@
 
 services:
   - type: web
-    name: consegne-vorwerk
+    name: consegne
     runtime: node
     region: frankfurt
     buildCommand: npm ci && npm run build
