@@ -20,6 +20,7 @@ async function publicView(d: DeliveryView) {
   const f = (k: keyof typeof m, v = cur) => fillText(m[k], v);
   return {
     order_ref: d.order_ref,
+    company: d.tenant_name,
     status: d.status,
     first_name: cur.nome,
     product: d.product,

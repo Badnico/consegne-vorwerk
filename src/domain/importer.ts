@@ -28,6 +28,7 @@ export interface ImportRow {
 export interface PlannedRow extends ImportRow {
   errors: string[];
   slot: { date: string; bandId: string } | null; // fascia che verrà proposta
+  slotIssue: string | null; // la fascia chiesta non è disponibile: si può sceglierne un'altra prima dell'invio
   auto: boolean; // fascia scelta dal sistema
 }
 
@@ -173,7 +174,7 @@ export async function parseWorkbook(buf: Buffer): Promise<{ rows: ImportRow[]; e
           product: txt('product').slice(0, 120), order_ref: txt('order_ref').slice(0, 60),
           date: date === 'invalid' ? null : date, band: band === 'invalid' ? null : band,
         };
-        if (err.length) errors.push({ ...item, errors: err, slot: null, auto: false });
+        if (err.length) errors.push({ ...item, errors: err, slot: null, slotIssue: null, auto: false });
         else rows.push(item);
       }
       return { rows, errors, missing: [] };
@@ -227,13 +228,15 @@ export function planSlots(rows: ImportRow[], open: { slots: SlotRow[]; first: st
     const candidates = open.slots.filter((s) =>
       (row.date ? s.date === row.date : s.date >= open.first) && (row.band ? s.start === row.band : true));
     const pick = candidates.find((s) => (free.get(s.id) ?? 0) > 0);
+    let slotIssue: string | null = null;
     if (!pick) {
-      if (row.date && row.band) errors.push(candidates.length ? `la fascia ${row.band} del ${it(row.date)} è piena` : `non c'è una fascia alle ${row.band} il ${it(row.date)}`);
-      else if (row.date) errors.push(candidates.length ? `il ${it(row.date)} è tutto pieno` : `il ${it(row.date)} non ci sono consegne`);
-      else errors.push('nessuna fascia libera nei prossimi giorni');
+      if (row.date && row.band) slotIssue = candidates.length ? `la fascia ${row.band} del ${it(row.date)} è piena` : `non c'è una fascia alle ${row.band} il ${it(row.date)}`;
+      else if (row.date) slotIssue = candidates.length ? `il ${it(row.date)} è tutto pieno` : `il ${it(row.date)} non ci sono consegne`;
+      else slotIssue = 'nessuna fascia libera nei prossimi giorni';
     }
-    if (pick && !errors.length) free.set(pick.id, free.get(pick.id)! - 1);
-    return { ...row, errors, slot: pick && !errors.length ? { date: pick.date, bandId: `${pick.start}-${pick.end}` } : null, auto };
+    const ok = pick && !errors.length;
+    if (ok) free.set(pick.id, free.get(pick.id)! - 1);
+    return { ...row, errors, slot: ok ? { date: pick.date, bandId: `${pick.start}-${pick.end}` } : null, slotIssue, auto };
   });
 }
 

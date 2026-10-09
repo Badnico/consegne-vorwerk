@@ -8,7 +8,7 @@ export const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', 
 /** Testo semplice → HTML: escape e a capo */
 export const para = (s: string) => `<p>${esc(s).replace(/\n/g, '<br>')}</p>`;
 
-/** Indirizzo di EMAIL_FROM senza il nome: "Vorwerk Consegne <a@b.it>" → "a@b.it" */
+/** Indirizzo di EMAIL_FROM senza il nome: "Consegne <a@b.it>" → "a@b.it" */
 export const fromAddress = (from: string) => (from.match(/<([^>]+)>/)?.[1] ?? from).trim();
 
 /**

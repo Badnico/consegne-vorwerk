@@ -162,7 +162,7 @@ test("modo A: ogni messaggio porta il nome dell'azienda dell'ambiente", async ()
   const v = messageVars(d, 'proposed');
   assert.match(fillText(m.wa_proposal, v), /per conto di Uno\./);
   assert.match(fillText(m.mail_subject, v), /^Uno: la tua consegna /);
-  assert.equal(fromAddress('Vorwerk Consegne <consegne@esempio.it>'), 'consegne@esempio.it');
+  assert.equal(fromAddress('Servizio Consegne <consegne@esempio.it>'), 'consegne@esempio.it');
   assert.equal(fromAddress('consegne@esempio.it'), 'consegne@esempio.it');
 });
 
@@ -215,10 +215,11 @@ test('Excel: le fasce proposte rispettano la capienza, anche tra righe dello ste
   ], open, new Set(['old']));
   assert.deepEqual(plan[0]!.slot, { date: '2030-01-02', bandId: '08:00-11:00' });
   assert.deepEqual(plan[1]!.slot, { date: '2030-01-02', bandId: '11:00-14:00' });
-  assert.match(plan[2]!.errors.join(), /nessuna fascia libera/);
+  assert.match(plan[2]!.slotIssue ?? '', /nessuna fascia libera/);
   assert.match(plan[3]!.errors.join(), /ripetuto nel file/);
   assert.match(plan[4]!.errors.join(), /già nel sistema/);
-  assert.match(plan[5]!.errors.join(), /piena/);
+  assert.match(plan[5]!.slotIssue ?? '', /piena/);
+  assert.equal(plan[5]!.errors.length, 0); // dati giusti: basta scegliere un'altra fascia
 });
 
 test('report Excel: situazioni da confermare, confermate e da chiudere', async () => {
@@ -243,6 +244,7 @@ test('report Excel: situazioni da confermare, confermate e da chiudere', async (
   assert.equal(await getReportFile(pool, T, rep.id), null); // non visibile da un altro ambiente
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load((await getReportFile(pool, T2, rep.id))!.data as unknown as ArrayBuffer);
+  assert.equal(wb.worksheets[0]!.name, 'Consegne'); // si apre sul foglio con un cliente per riga
   const ws = wb.getWorksheet('Consegne')!;
   assert.equal(ws.rowCount, 4);
   assert.equal(ws.getRow(2).getCell(1).value, 'Da chiudere');

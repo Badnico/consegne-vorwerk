@@ -25,7 +25,7 @@ const schema = z.object({
   WHATSAPP_TEMPLATE_LANG: z.string().default('it'),
 
   SMTP_URL: z.string().default(''),
-  EMAIL_FROM: z.string().default('Vorwerk Consegne <consegne@example.it>'),
+  EMAIL_FROM: z.string().default('Consegne <consegne@example.it>'),
 });
 
 export const config = schema.parse(process.env);

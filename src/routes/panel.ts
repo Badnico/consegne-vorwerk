@@ -242,10 +242,13 @@ export async function panelRoutes(app: FastifyInstance) {
     try { parsed = await parseWorkbook(Buffer.from(b.file, 'base64')); }
     catch (err) { throw new DomainError('invalid_file', (err as Error).message, 422); }
     if (parsed.missing.length) throw new DomainError('missing_columns', `Nel file mancano le colonne: ${parsed.missing.join(', ')}. Scarica il modello per vedere come deve essere.`, 422);
-    const planned = planSlots(parsed.rows, await openSlots(pool, t), await existingRefs(t), await openPeople(t));
+    const open = await openSlots(pool, t);
+    const planned = planSlots(parsed.rows, open, await existingRefs(t), await openPeople(t));
     const rows: PlannedRow[] = [...planned, ...parsed.errors].sort((a, b2) => a.line - b2.line);
     if (!rows.length) throw new DomainError('empty_file', 'Il file non contiene consegne: sotto le intestazioni non ci sono righe compilate.', 422);
-    return { rows, ok: rows.filter((r) => !r.errors.length).length };
+    // fasce disponibili, per scegliere data e fascia riga per riga prima dell'invio
+    const slots = open.slots.map((s) => ({ date: s.date, bandId: `${s.start}-${s.end}`, free: s.free }));
+    return { rows, ok: rows.filter((r) => !r.errors.length && !r.slotIssue).length, first: open.first, slots };
   });
 
   /** Crea le consegne valide e invia a tutti il messaggio. Le fasce vengono ricontrollate al momento. */
@@ -263,7 +266,7 @@ export async function panelRoutes(app: FastifyInstance) {
     for (const r of b.rows as ImportRow[]) {
       // ricalcola lo slot con i posti di adesso (nel frattempo altri potrebbero averli presi)
       const [plan] = planSlots([r], await openSlots(pool, t), refs, people);
-      if (!plan || plan.errors.length || !plan.slot) { results.push({ line: r.line, ok: false, name: r.name, error: plan?.errors.join('; ') || 'non inviata' }); continue; }
+      if (!plan || plan.errors.length || !plan.slot) { results.push({ line: r.line, ok: false, name: r.name, error: [...(plan?.errors ?? []), plan?.slotIssue].filter(Boolean).join('; ') || 'non inviata' }); continue; }
       try {
         const ref = r.order_ref || await newOrderRef(t, refs);
         const id = await createDelivery(t, {

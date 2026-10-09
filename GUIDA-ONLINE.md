@@ -57,6 +57,7 @@ In **Nuova consegna** premi **Scegli il file Excel** e seleziona il file (.xlsx)
 - Colonne necessarie: **Cliente**, **Indirizzo**, **CAP** e almeno uno tra **Telefono** ed **Email**. Vanno bene anche nomi simili (Nome e Cognome separati, Cellulare, E-mail, Città, N. ordine…).
 - Facoltative: **Ordine**, **Prodotto**, **Data**, **Fascia**. Se mancano Data e Fascia il sistema propone la prima fascia libera.
 - Prima dell'invio vedi una tabella con tutte le righe: quelle con errori sono in rosso con il motivo e non vengono inviate.
+- Per ogni cliente puoi scegliere **Data proposta** e **Fascia oraria** nella tabella. Con **Compila in automatico data e fascia** il sistema assegna a tutti la prima fascia libera secondo "Slot e capienza"; con **Applica** dai la stessa data e/o fascia a tutte le righe. Se una fascia è piena la riga diventa gialla e non viene inviata finché non la cambi.
 - **Invia messaggio ai clienti** crea tutte le consegne e manda il messaggio a tutti insieme.
 - Se ricarichi lo stesso file, le consegne già inserite vengono riconosciute e non partono due volte.
 

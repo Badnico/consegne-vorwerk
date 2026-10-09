@@ -47,6 +47,8 @@ export async function buildReport(db: Db, tenantId: string, tenantName: string) 
   const now = new Date();
   const stamp = now.toLocaleString('it-IT', { timeZone: config.TIMEZONE, day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
+  // prima il foglio con un cliente per riga (si apre per primo), poi il riepilogo
+  const ws = wb.addWorksheet('Consegne', { views: [{ state: 'frozen', ySplit: 1 }] });
   const sum = wb.addWorksheet('Riepilogo');
   sum.getColumn(1).width = 26; sum.getColumn(2).width = 14;
   sum.addRow([tenantName]).font = { bold: true, size: 14 };
@@ -62,7 +64,6 @@ export async function buildReport(db: Db, tenantId: string, tenantName: string) 
   sum.addRow(['Da chiudere: consegne confermate di oggi o dei giorni passati che aspettano l\'esito (consegnata o non consegnata).']);
   sum.addRow(['Da confermare: il cliente non ha ancora risposto, deve scegliere la nuova data o va contattato.']);
 
-  const ws = wb.addWorksheet('Consegne', { views: [{ state: 'frozen', ySplit: 1 }] });
   ws.columns = [
     { header: 'Situazione', key: 'sit', width: 15 },
     { header: 'Dettaglio', key: 'st', width: 40 },

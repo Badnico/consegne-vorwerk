@@ -245,6 +245,12 @@ a.btn{text-decoration:none;color:inherit;display:inline-flex;align-items:center}
 .imptab td small{display:block;color:var(--muted)}
 .imptab tr.bad td{background:var(--red-soft)}
 .imptab .why{color:var(--red);font-weight:600}
+.imptab tr.warnrow td{background:var(--amber-soft)}
+.imptab input[type=date],.imptab select{font:inherit;font-size:13px;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--fg);max-width:170px}
+.imptab small.why{margin-top:3px}
+.imptools{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:4px 0 6px}
+.imptools select{font:inherit;font-size:13px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--fg)}
+.imptools .sep{color:var(--muted);font-size:13px;margin-left:6px}
 .impwrap{max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:10px}
 .replist{display:grid;gap:8px}
 .repitem{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:13px}
@@ -311,7 +317,7 @@ a.btn{text-decoration:none;color:inherit;display:inline-flex;align-items:center}
       <div class="pane" id="p-new" hidden>
         <fieldset id="imp">
           <legend>Carica le consegne da Excel</legend>
-          <p class="note">Una riga per consegna. Colonne necessarie: <b>Cliente</b>, <b>Indirizzo</b>, <b>CAP</b> e almeno uno tra <b>Telefono</b> ed <b>Email</b>. Facoltative: Ordine, Prodotto, Data e Fascia: se mancano, proponiamo noi la prima fascia libera.</p>
+          <p class="note">Una riga per consegna. Colonne necessarie: <b>Cliente</b>, <b>Indirizzo</b>, <b>CAP</b> e almeno uno tra <b>Telefono</b> ed <b>Email</b>. Facoltative: Ordine, Prodotto, Data e Fascia. Prima dell'invio puoi scegliere data e fascia per ogni cliente o compilarle in automatico.</p>
           <div class="btngroup">
             <label class="btn primary filebtn">Scegli il file Excel<input type="file" id="impFile" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"></label>
             <a class="btn" href="/api/panel/import/template" download>Scarica il modello</a>
@@ -1040,7 +1046,7 @@ $('askBar').addEventListener('click', async e => {
 });
 
 /* ---------- importazione da Excel ---------- */
-const imp = {rows:null, busy:false, result:null, file:''};
+const imp = {rows:null, busy:false, result:null, file:'', slots:[], first:''};
 $('impFile').addEventListener('change', async e => {
   const f = e.target.files[0]; e.target.value = ''; if (!f) return;
   const err = $('impErr'); err.hidden = true; imp.rows = null; imp.result = null; imp.file = f.name;
@@ -1049,11 +1055,49 @@ $('impFile').addEventListener('change', async e => {
   try {
     const b64 = await new Promise((ok, ko) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(',')[1] || ''); r.onerror = () => ko(new Error('Non riesco a leggere il file.')); r.readAsDataURL(f); });
     const r = await api('/import/preview', {body:{file:b64}});
-    imp.rows = r.rows;
+    imp.slots = r.slots; imp.first = r.first;
+    // data e fascia di partenza: quelle del file o quelle proposte dal sistema (modificabili)
+    imp.rows = r.rows.map(x => ({...x, sel: x.slot ? {...x.slot} : {date: x.date || '', bandId: ''}}));
   } catch (ex){ err.textContent = ex.message; err.hidden = false; }
   renderImport();
 });
-function fmtSlot(sl){ return sl ? `${esc(fmtShort(sl.date))} · <span class="mono">${bandLabel(sl.bandId)}</span>` : ''; }
+const impSendable = x => !x.errors.length;
+/** Controlla le scelte riga per riga contando i posti presi dalle righe precedenti. */
+function impCheck(){
+  const used = {};
+  for (const x of imp.rows){
+    x.issue = null;
+    if (!impSendable(x)) continue;
+    if (!x.sel.date){ x.issue = 'scegli la data'; continue; }
+    if (!x.sel.bandId){ x.issue = imp.slots.some(s => s.date === x.sel.date) ? 'scegli la fascia' : 'in questo giorno non ci sono consegne'; continue; }
+    const s = imp.slots.find(s => s.date === x.sel.date && s.bandId === x.sel.bandId);
+    if (!s){ x.issue = 'fascia non disponibile in questo giorno'; continue; }
+    const k = s.date + '|' + s.bandId; used[k] = (used[k] || 0) + 1;
+    if (used[k] > s.free) x.issue = s.free ? `fascia piena: ${s.free} ${s.free===1?'posto':'posti'} e già ${used[k]-1} ${used[k]-1===1?'riga':'righe'} prima` : 'fascia piena';
+  }
+}
+/** Posti liberi di una fascia tolte le altre righe che l'hanno già scelta. */
+function impFree(date, bandId, except){
+  const s = imp.slots.find(s => s.date === date && s.bandId === bandId); if (!s) return 0;
+  return s.free - imp.rows.filter(x => x !== except && impSendable(x) && x.sel.date === date && x.sel.bandId === bandId).length;
+}
+/** Assegna a tutte le righe la prima fascia libera, dal preavviso minimo in poi, secondo "Slot e capienza". */
+function impAuto(){
+  const left = {}; imp.slots.forEach(s => left[s.date+'|'+s.bandId] = s.free);
+  let none = 0;
+  for (const x of imp.rows){
+    if (!impSendable(x)) continue;
+    const s = imp.slots.find(s => s.date >= imp.first && left[s.date+'|'+s.bandId] > 0);
+    if (s){ left[s.date+'|'+s.bandId]--; x.sel = {date:s.date, bandId:s.bandId}; } else { x.sel = {date:'', bandId:''}; none++; }
+  }
+  return none;
+}
+function impBandOptions(x){
+  const bands = imp.slots.filter(s => s.date === x.sel.date);
+  if (!x.sel.date) return '<option value="">prima la data</option>';
+  if (!bands.length) return '<option value="">nessuna fascia</option>';
+  return '<option value="">scegli…</option>' + bands.map(s => { const f = impFree(s.date, s.bandId, x); return `<option value="${s.bandId}" ${s.bandId===x.sel.bandId?'selected':''} ${f<=0 && s.bandId!==x.sel.bandId?'disabled':''}>${bandLabel(s.bandId)} · ${f<=0?'piena':f+' liberi'}</option>`; }).join('');
+}
 function renderImport(){
   const box = $('impPrev');
   if (imp.result){
@@ -1063,20 +1107,53 @@ function renderImport(){
     return;
   }
   if (!imp.rows){ box.innerHTML = ''; return; }
-  const ok = imp.rows.filter(x => !x.errors.length), bad = imp.rows.length - ok.length;
-  box.innerHTML = `<div class="imphead"><b>${esc(imp.file)}</b><span>${ok.length} ${ok.length===1?'consegna pronta':'consegne pronte'}${bad ? ` · <span class="capout out">${bad} con errori, non verranno inviate</span>` : ''}</span></div>
-    <div class="impwrap"><table class="imptab"><thead><tr><th>Riga</th><th>Cliente</th><th>Indirizzo</th><th>Contatti</th><th>Ordine</th><th>Fascia proposta</th></tr></thead><tbody>${
-    imp.rows.map(x => `<tr class="${x.errors.length?'bad':''}"><td class="mono">${x.line}</td><td><b>${esc(x.name||'—')}</b>${x.product?`<small>${esc(x.product)}</small>`:''}</td>
+  impCheck();
+  const ready = imp.rows.filter(x => impSendable(x) && !x.issue).length, bad = imp.rows.filter(x => !impSendable(x)).length, todo = imp.rows.filter(x => impSendable(x) && x.issue).length;
+  const minD = imp.slots[0]?.date || '', maxD = imp.slots.at(-1)?.date || '';
+  const dates = [...new Set(imp.slots.map(s => s.date))];
+  box.innerHTML = `<div class="imphead"><b>${esc(imp.file)}</b><span>${ready} ${ready===1?'consegna pronta':'consegne pronte'}${todo ? ` · <span class="capout out">${todo} senza data o fascia valida</span>` : ''}${bad ? ` · <span class="capout out">${bad} con errori, non verranno inviate</span>` : ''}</span></div>
+    <div class="imptools">
+      <button class="btn" id="impAuto" type="button">Compila in automatico data e fascia</button>
+      <span class="sep">oppure a tutte:</span>
+      <select id="impAllD"><option value="">data…</option>${dates.map(d => `<option value="${d}">${esc(fmtShort(d))}</option>`).join('')}</select>
+      <select id="impAllB"><option value="">fascia…</option>${cfg.bands.map(b => `<option value="${b.id}">${bandLabel(b.id)}</option>`).join('')}</select>
+      <button class="btn" id="impAll" type="button">Applica</button>
+    </div>
+    <p class="note">"Compila in automatico" usa le fasce e le capienze di "Slot e capienza": a ogni cliente la prima fascia libera dal preavviso minimo in poi. Puoi poi cambiare data e fascia riga per riga.</p>
+    <div class="impwrap"><table class="imptab"><thead><tr><th>Riga</th><th>Cliente</th><th>Indirizzo</th><th>Contatti</th><th>Ordine</th><th>Data proposta</th><th>Fascia oraria</th></tr></thead><tbody>${
+    imp.rows.map((x, i) => `<tr class="${!impSendable(x)?'bad':x.issue?'warnrow':''}"><td class="mono">${x.line}</td><td><b>${esc(x.name||'—')}</b>${x.product?`<small>${esc(x.product)}</small>`:''}</td>
       <td>${esc(x.address)}<small class="mono">${esc(x.cap)}${x.cap && area.on && !inArea(x.cap) ? ' · fuori area' : ''}</small></td>
       <td>${x.phone?`<span class="mono">${esc(x.phone)}</span>`:''}${x.email?`<small>${esc(x.email)}</small>`:''}</td>
       <td class="mono">${esc(x.order_ref) || '<small>automatico</small>'}</td>
-      <td>${x.errors.length ? `<span class="why">${esc(x.errors.join('; '))}</span>` : fmtSlot(x.slot) + (x.auto ? '<small>scelta dal sistema</small>' : '')}</td></tr>`).join('')}</tbody></table></div>
-    <div class="btngroup" style="margin-top:12px"><button class="btn primary" id="impGo" type="button" ${ok.length && !imp.busy ? '' : 'disabled'}>${imp.busy ? 'Invio in corso…' : `Invia messaggio ai clienti (${ok.length})`}</button><button class="btn ghost" id="impClose" type="button">Annulla</button></div>`;
+      ${impSendable(x)
+        ? `<td><input type="date" data-impd="${i}" value="${x.sel.date}" min="${minD}" max="${maxD}" aria-label="Data proposta riga ${x.line}"></td>
+           <td><select data-impb="${i}" aria-label="Fascia oraria riga ${x.line}">${impBandOptions(x)}</select>${x.issue ? `<small class="why">${esc(x.issue)}</small>` : ''}</td>`
+        : `<td colspan="2"><span class="why">${esc(x.errors.join('; '))}</span></td>`}</tr>`).join('')}</tbody></table></div>
+    <div class="btngroup" style="margin-top:12px"><button class="btn primary" id="impGo" type="button" ${ready && !imp.busy ? '' : 'disabled'}>${imp.busy ? 'Invio in corso…' : `Invia messaggio ai clienti (${ready})`}</button><button class="btn ghost" id="impClose" type="button">Annulla</button></div>
+    ${todo && ready ? '<p class="note">Le righe senza data o fascia valida non vengono inviate: sistemale qui sopra o premi "Compila in automatico".</p>' : ''}`;
 }
+$('impPrev').addEventListener('change', e => {
+  const d = e.target.dataset;
+  if (d.impd !== undefined){
+    const x = imp.rows[+d.impd]; x.sel.date = e.target.value;
+    // tiene la fascia se esiste quel giorno ed è libera, altrimenti la prima libera
+    const ok = x.sel.bandId && imp.slots.some(s => s.date === x.sel.date && s.bandId === x.sel.bandId) && impFree(x.sel.date, x.sel.bandId, x) > 0;
+    if (!ok){ const s = imp.slots.find(s => s.date === x.sel.date && impFree(s.date, s.bandId, x) > 0); x.sel.bandId = s ? s.bandId : ''; }
+    renderImport();
+  } else if (d.impb !== undefined){ imp.rows[+d.impb].sel.bandId = e.target.value; renderImport(); }
+});
 $('impPrev').addEventListener('click', async e => {
   if (e.target.closest('#impClose')){ imp.rows = null; imp.result = null; $('impErr').hidden = true; renderImport(); return; }
+  if (e.target.closest('#impAuto')){ const none = impAuto(); renderImport(); toast(none ? `${none} ${none===1?'cliente':'clienti'} senza fascia libera: aumenta la capienza o i giorni` : 'Date e fasce assegnate in automatico'); return; }
+  if (e.target.closest('#impAll')){
+    const dd = $('impAllD').value, bb = $('impAllB').value;
+    if (!dd && !bb){ toast('Scegli una data, una fascia o entrambe'); return; }
+    imp.rows.filter(impSendable).forEach(x => { if (dd) x.sel.date = dd; if (bb) x.sel.bandId = bb; });
+    renderImport(); return;
+  }
   if (!e.target.closest('#impGo') || imp.busy) return;
-  const rows = imp.rows.filter(x => !x.errors.length).map(({errors, slot, auto, ...r}) => r);
+  impCheck();
+  const rows = imp.rows.filter(x => impSendable(x) && !x.issue).map(({errors, slot, slotIssue, auto, sel, issue, ...r}) => ({...r, date: sel.date, band: sel.bandId.split('-')[0]}));
   imp.busy = true; renderImport();
   try {
     imp.result = await api('/import/commit', {body:{rows}}); imp.rows = null;

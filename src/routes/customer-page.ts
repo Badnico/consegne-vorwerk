@@ -7,7 +7,7 @@ export function customerPage(state: unknown): string {
   const json = JSON.stringify(state).replace(/</g, '\\u003c');
   return `<!doctype html>
 <html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="robots" content="noindex"><title>La tua consegna Vorwerk</title>
+<meta name="robots" content="noindex"><title>La tua consegna</title>
 <style>
 :root{--bg:#f3f5f3;--card:#fff;--line:#d5ddd7;--fg:#18231d;--muted:#5d6b63;--accent:#0b7a4b;--accent-soft:#dcefe4;--warn:#a8650a;--err:#b3362b;color-scheme:light}
 @media (prefers-color-scheme:dark){:root{--bg:#111613;--card:#18201b;--line:#2e3a33;--fg:#e4ece7;--muted:#9aaba1;--accent:#3fc283;--accent-soft:#1d3a2b;--warn:#e7a94a;--err:#ef7f73;color-scheme:dark}}
@@ -42,9 +42,10 @@ async function api(path, body) {
   return j;
 }
 
+if (state && state.company) document.title = 'La tua consegna · ' + state.company;
 function render() {
   const app = $('#app'), bar = $('#bar'), T = state && state.texts;
-  if (!state) { app.innerHTML = '<h1>Link non valido</h1><p class="muted">Il link è scaduto o non è corretto. Contatta il servizio clienti Vorwerk.</p>'; bar.hidden = true; return; }
+  if (!state) { app.innerHTML = '<h1>Link non valido</h1><p class="muted">Il link è scaduto o non è corretto. Contatta chi ti ha mandato il messaggio.</p>'; bar.hidden = true; return; }
   const head = '<h1>Ciao ' + esc(state.first_name) + '</h1><p class="muted">Ordine ' + esc(state.order_ref) + ' · ' + esc(state.product || '') + ' · ' + esc(state.address_short) + '</p>';
   bar.hidden = true;
   if (state.status === 'proposed') {
