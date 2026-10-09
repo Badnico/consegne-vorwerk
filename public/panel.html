@@ -235,6 +235,21 @@ body.solo .screen{height:calc(100dvh - 24px);border-radius:14px;border:1px solid
 .cust dd{margin:0;overflow-wrap:anywhere}
 .cust a{color:inherit}
 .askbar{margin-top:10px}
+a.btn{text-decoration:none;color:inherit;display:inline-flex;align-items:center}
+.filebtn{position:relative;overflow:hidden;cursor:pointer}
+.filebtn input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.imphead{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;margin:14px 0 8px;font-size:14px}
+.imptab{width:100%;border-collapse:collapse;font-size:13px;min-width:760px}
+.imptab th{text-align:left;font-weight:600;color:var(--muted);font-size:12px;padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+.imptab td{padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+.imptab td small{display:block;color:var(--muted)}
+.imptab tr.bad td{background:var(--red-soft)}
+.imptab .why{color:var(--red);font-weight:600}
+.impwrap{max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:10px}
+.replist{display:grid;gap:8px}
+.repitem{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:13px}
+.repitem b{font-size:14px}
+.repitem .grow{flex:1 1 220px}
 </style>
 </head>
 <body>
@@ -260,6 +275,7 @@ body.solo .screen{height:calc(100dvh - 24px);border-radius:14px;border:1px solid
         <button role="tab" id="t-slot" aria-selected="false" data-tab="slot">Slot e capienza</button>
         <button role="tab" id="t-area" aria-selected="false" data-tab="area">Area servita</button>
         <button role="tab" id="t-msg" aria-selected="false" data-tab="msg">Messaggi</button>
+        <button role="tab" id="t-rep" aria-selected="false" data-tab="rep">Report Excel</button>
       </div>
 
       <div class="pane" id="p-cal">
@@ -293,9 +309,19 @@ body.solo .screen{height:calc(100dvh - 24px);border-radius:14px;border:1px solid
       </div>
 
       <div class="pane" id="p-new" hidden>
+        <fieldset id="imp">
+          <legend>Carica le consegne da Excel</legend>
+          <p class="note">Una riga per consegna. Colonne necessarie: <b>Cliente</b>, <b>Indirizzo</b>, <b>CAP</b> e almeno uno tra <b>Telefono</b> ed <b>Email</b>. Facoltative: Ordine, Prodotto, Data e Fascia: se mancano, proponiamo noi la prima fascia libera.</p>
+          <div class="btngroup">
+            <label class="btn primary filebtn">Scegli il file Excel<input type="file" id="impFile" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"></label>
+            <a class="btn" href="/api/panel/import/template" download>Scarica il modello</a>
+          </div>
+          <p class="err" id="impErr" hidden></p>
+          <div id="impPrev"></div>
+        </fieldset>
         <form id="fNew" novalidate>
           <fieldset>
-            <legend>Proponi una consegna</legend>
+            <legend>Oppure inserisci una consegna a mano</legend>
             <div class="fields">
               <label class="f">Cliente<input id="nName" required placeholder="Nome e cognome"></label>
               <label class="f">Indirizzo<input id="nAddr" required placeholder="Via, civico, città"></label>
@@ -311,6 +337,25 @@ body.solo .screen{height:calc(100dvh - 24px);border-radius:14px;border:1px solid
           </fieldset>
         </form>
         <p class="note">Il messaggio parte su WhatsApp e/o email in base ai contatti inseriti. Dopo l'invio trovi a destra i dati del cliente e il messaggio che riceve.</p>
+      </div>
+
+      <div class="pane" id="p-rep" hidden>
+        <fieldset>
+          <legend>Report automatico</legend>
+          <p class="note">Ogni tot ore il sistema crea un file Excel con tutte le consegne aperte, i dati dei clienti e la situazione di ognuna: <b>da confermare</b>, <b>confermata</b> o <b>da chiudere</b> (data passata, manca l'esito).</p>
+          <div class="fields">
+            <label class="f">Genera un report ogni (ore)<input id="repHours" type="number" min="0" max="720" step="1" inputmode="numeric"><small>0 = spento. Es. 24 = una volta al giorno.</small></label>
+            <label class="f">Manda il report a<input id="repTo" type="email" placeholder="email dell'ambiente"><small id="repToHint"></small></label>
+          </div>
+          <div class="days"><label><input type="checkbox" id="repMail"> Invia anche per email, con il file allegato</label></div>
+          <p class="note" id="repNote"></p>
+          <p class="err" id="repErr" hidden></p>
+          <div class="btngroup"><button class="btn primary" id="repSave" type="button">Salva</button><button class="btn" id="repNow" type="button">Genera adesso</button></div>
+        </fieldset>
+        <fieldset>
+          <legend>Report generati</legend>
+          <div id="repList"><p class="note">Caricamento…</p></div>
+        </fieldset>
       </div>
 
       <div class="pane" id="p-slot" hidden>
@@ -936,7 +981,8 @@ document.querySelector('.tabs').addEventListener('click', e => {
   const b = e.target.closest('[data-tab]'); if (!b) return;
   ui.tab = b.dataset.tab;
   document.querySelectorAll('.tabs [data-tab]').forEach(t => t.setAttribute('aria-selected', t===b));
-  ['cal','list','new','slot','area','msg'].forEach(k => $('p-'+k).hidden = k !== ui.tab);
+  ['cal','list','new','slot','area','msg','rep'].forEach(k => $('p-'+k).hidden = k !== ui.tab);
+  if (ui.tab==='rep') loadReports();
   if (ui.tab==='area' && !areaDirty) renderAreaEditor();
   if (ui.tab==='slot' && !ui.slotDirty) renderSlotEditor();
   if (ui.tab==='msg' && !msgDraft) renderMsgEditor();
@@ -992,6 +1038,93 @@ $('askBar').addEventListener('click', async e => {
     toast(bar.dataset.a === 'yes' ? 'Consegna confermata' : r.status === 'fuori_area' ? 'Cliente fuori area: passato all\'operatore' : 'Posto liberato: ora puoi scegliere la nuova data dal link nel messaggio');
   } catch (err){ go.disabled = false; toast(err.message); }
 });
+
+/* ---------- importazione da Excel ---------- */
+const imp = {rows:null, busy:false, result:null, file:''};
+$('impFile').addEventListener('change', async e => {
+  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+  const err = $('impErr'); err.hidden = true; imp.rows = null; imp.result = null; imp.file = f.name;
+  if (f.size > 10 * 1024 * 1024){ err.textContent = 'Il file è troppo grande (massimo 10 MB).'; err.hidden = false; renderImport(); return; }
+  $('impPrev').innerHTML = '<p class="note">Lettura del file…</p>';
+  try {
+    const b64 = await new Promise((ok, ko) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(',')[1] || ''); r.onerror = () => ko(new Error('Non riesco a leggere il file.')); r.readAsDataURL(f); });
+    const r = await api('/import/preview', {body:{file:b64}});
+    imp.rows = r.rows;
+  } catch (ex){ err.textContent = ex.message; err.hidden = false; }
+  renderImport();
+});
+function fmtSlot(sl){ return sl ? `${esc(fmtShort(sl.date))} · <span class="mono">${bandLabel(sl.bandId)}</span>` : ''; }
+function renderImport(){
+  const box = $('impPrev');
+  if (imp.result){
+    const r = imp.result, bad = r.results.filter(x => !x.ok);
+    box.innerHTML = `<div class="imphead"><span class="pill s-confermato"><i class="dot"></i>${r.sent} ${r.sent===1?'messaggio inviato':'messaggi inviati'}</span>${bad.length ? `<span class="pill s-fuori_area"><i class="dot"></i>${bad.length} non ${bad.length===1?'inviata':'inviate'}</span>` : ''}<button class="btn ghost" id="impClose" type="button">Chiudi</button></div>` +
+      (bad.length ? `<div class="impwrap"><table class="imptab"><thead><tr><th>Riga</th><th>Cliente</th><th>Motivo</th></tr></thead><tbody>${bad.map(x => `<tr class="bad"><td class="mono">${x.line}</td><td>${esc(x.name)}</td><td class="why">${esc(x.error||'')}</td></tr>`).join('')}</tbody></table></div><p class="note">Correggi queste righe nel file e caricalo di nuovo: le consegne già inviate vengono riconosciute (dal numero d'ordine, o da nome e indirizzo) e non partono due volte.</p>` : '<p class="note">Le trovi in "Consegne" e nel calendario.</p>');
+    return;
+  }
+  if (!imp.rows){ box.innerHTML = ''; return; }
+  const ok = imp.rows.filter(x => !x.errors.length), bad = imp.rows.length - ok.length;
+  box.innerHTML = `<div class="imphead"><b>${esc(imp.file)}</b><span>${ok.length} ${ok.length===1?'consegna pronta':'consegne pronte'}${bad ? ` · <span class="capout out">${bad} con errori, non verranno inviate</span>` : ''}</span></div>
+    <div class="impwrap"><table class="imptab"><thead><tr><th>Riga</th><th>Cliente</th><th>Indirizzo</th><th>Contatti</th><th>Ordine</th><th>Fascia proposta</th></tr></thead><tbody>${
+    imp.rows.map(x => `<tr class="${x.errors.length?'bad':''}"><td class="mono">${x.line}</td><td><b>${esc(x.name||'—')}</b>${x.product?`<small>${esc(x.product)}</small>`:''}</td>
+      <td>${esc(x.address)}<small class="mono">${esc(x.cap)}${x.cap && area.on && !inArea(x.cap) ? ' · fuori area' : ''}</small></td>
+      <td>${x.phone?`<span class="mono">${esc(x.phone)}</span>`:''}${x.email?`<small>${esc(x.email)}</small>`:''}</td>
+      <td class="mono">${esc(x.order_ref) || '<small>automatico</small>'}</td>
+      <td>${x.errors.length ? `<span class="why">${esc(x.errors.join('; '))}</span>` : fmtSlot(x.slot) + (x.auto ? '<small>scelta dal sistema</small>' : '')}</td></tr>`).join('')}</tbody></table></div>
+    <div class="btngroup" style="margin-top:12px"><button class="btn primary" id="impGo" type="button" ${ok.length && !imp.busy ? '' : 'disabled'}>${imp.busy ? 'Invio in corso…' : `Invia messaggio ai clienti (${ok.length})`}</button><button class="btn ghost" id="impClose" type="button">Annulla</button></div>`;
+}
+$('impPrev').addEventListener('click', async e => {
+  if (e.target.closest('#impClose')){ imp.rows = null; imp.result = null; $('impErr').hidden = true; renderImport(); return; }
+  if (!e.target.closest('#impGo') || imp.busy) return;
+  const rows = imp.rows.filter(x => !x.errors.length).map(({errors, slot, auto, ...r}) => r);
+  imp.busy = true; renderImport();
+  try {
+    imp.result = await api('/import/commit', {body:{rows}}); imp.rows = null;
+    await load();
+    toast(`${imp.result.sent} ${imp.result.sent===1?'messaggio inviato':'messaggi inviati'}`);
+  } catch (ex){ $('impErr').textContent = ex.message; $('impErr').hidden = false; }
+  imp.busy = false; renderImport();
+});
+
+/* ---------- report Excel ---------- */
+let repData = null;
+async function loadReports(){
+  try { repData = await api('/reports'); renderReports(); }
+  catch (e){ $('repList').innerHTML = `<p class="err">${esc(e.message)}</p>`; }
+}
+function renderReports(full = true){
+  if (!repData) return;
+  const st = repData.setting;
+  if (full){ $('repHours').value = st.hours; $('repTo').value = st.to; $('repMail').checked = st.email; }
+  $('repToHint').textContent = repData.tenantEmail ? `Se lo lasci vuoto: ${repData.tenantEmail}` : '';
+  const h = +$('repHours').value || 0;
+  const last = repData.reports.find(r => r.trigger === 'auto');
+  $('repNote').innerHTML = !h ? 'Report automatico spento. Puoi sempre crearne uno con "Genera adesso".'
+    : `Il report viene creato ogni <b>${h} ${h===1?'ora':'ore'}</b>${last ? `; l'ultimo automatico è del ${new Date(last.created_at).toLocaleString('it-IT',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}` : '; il primo arriva entro 10 minuti dal salvataggio'}.` +
+      ($('repMail').checked && !repData.emailReady ? ' <span class="capout out">L\'invio email non è ancora attivo sul server: il report resta scaricabile qui sotto.</span>' : '');
+  $('repList').innerHTML = repData.reports.length ? '<div class="replist">' + repData.reports.map(r => {
+    const c = r.counts || {};
+    return `<div class="repitem"><span class="grow"><b>${new Date(r.created_at).toLocaleString('it-IT',{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</b><br><small>${r.trigger==='auto'?'automatico':'generato a mano'}${r.emailed_to ? ' · inviato a '+esc(r.emailed_to) : ''}</small></span>
+      <span>${c['Da chiudere']||0} da chiudere · ${c['Da confermare']||0} da confermare · ${c['Confermata']||0} confermate</span>
+      <a class="btn" href="/api/panel/reports/${r.id}" download>Scarica</a></div>`;
+  }).join('') + '</div>' : '<p class="note">Nessun report ancora.</p>';
+}
+['repHours','repMail'].forEach(id => $(id).addEventListener('input', () => renderReports(false)));
+$('repSave').onclick = async () => {
+  const err = $('repErr'); err.hidden = true;
+  const hours = Math.round(+$('repHours').value);
+  if (!Number.isFinite(hours) || hours < 0 || hours > 720){ err.textContent = 'Inserisci un numero di ore tra 0 e 720.'; err.hidden = false; return; }
+  try {
+    repData.setting = await api('/reports/setting', {method:'PUT', body:{hours, email:$('repMail').checked, to:$('repTo').value.trim()}});
+    renderReports(); toast(hours ? `Report automatico ogni ${hours} ${hours===1?'ora':'ore'}` : 'Report automatico spento');
+  } catch (e){ err.textContent = e.message; err.hidden = false; }
+};
+$('repNow').onclick = async () => {
+  const b = $('repNow'); b.disabled = true;
+  try { const r = await api('/reports', {method:'POST', body:{}}); await loadReports(); toast('Report creato'); location.href = `/api/panel/reports/${r.id}`; }
+  catch (e){ toast(e.message); }
+  b.disabled = false;
+};
 
 $('nDate').addEventListener('change', renderBandSelect);
 $('fNew').addEventListener('submit', async e => {
