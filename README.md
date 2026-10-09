@@ -73,6 +73,11 @@ Ogni azienda cliente ha un ambiente separato con indirizzo `/<ambiente>/`, utent
 
 Il superamministratore (`/admin`) nasce da `ADMIN_EMAIL` e `ADMIN_PASSWORD` al primo avvio.
 
+## Importazione da Excel e report
+
+- `src/domain/importer.ts`: lettura del file (intestazioni tolleranti, CAP e telefoni numerici, date e fasce in vari formati), scelta della fascia con la capienza contata anche tra le righe dello stesso file, doppioni per numero d'ordine o per nome e indirizzo. API: `GET /api/panel/import/template`, `POST /api/panel/import/preview` (file in base64, non crea nulla), `POST /api/panel/import/commit`.
+- `src/domain/report.ts`: report Excel con le consegne aperte e la situazione (da confermare, confermata, da chiudere). Impostazione per ambiente `report` (`hours`, `email`, `to`); la coda controlla ogni 10 minuti quali ambienti sono in scadenza. Gli ultimi 60 report restano nella tabella `reports`. API: `GET /api/panel/reports`, `PUT /api/panel/reports/setting`, `POST /api/panel/reports`, `GET /api/panel/reports/:id`.
+
 ## Area servita
 
 Se il cliente risponde No e il suo CAP è nell'area (CAP singoli, intervalli `20121-20162` o prefissi `201*`), riceve il link per scegliere la data. Fuori area la consegna diventa `out_of_area`, il cliente riceve un messaggio dedicato e l'operatore assegna la data dal pannello.

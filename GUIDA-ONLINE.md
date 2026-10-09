@@ -50,6 +50,20 @@ Il cliente (o tu, entrando con le sue credenziali) imposta:
 3. **Messaggi**: rivedi i testi.
 4. **Nuova consegna**: crea una consegna di prova con il tuo numero o la tua email.
 
+### Caricare le consegne da Excel
+
+In **Nuova consegna** premi **Scegli il file Excel** e seleziona il file (.xlsx). Con **Scarica il modello** ottieni un file già pronto con le colonne giuste.
+
+- Colonne necessarie: **Cliente**, **Indirizzo**, **CAP** e almeno uno tra **Telefono** ed **Email**. Vanno bene anche nomi simili (Nome e Cognome separati, Cellulare, E-mail, Città, N. ordine…).
+- Facoltative: **Ordine**, **Prodotto**, **Data**, **Fascia**. Se mancano Data e Fascia il sistema propone la prima fascia libera.
+- Prima dell'invio vedi una tabella con tutte le righe: quelle con errori sono in rosso con il motivo e non vengono inviate.
+- **Invia messaggio ai clienti** crea tutte le consegne e manda il messaggio a tutti insieme.
+- Se ricarichi lo stesso file, le consegne già inserite vengono riconosciute e non partono due volte.
+
+### Report Excel
+
+Nella scheda **Report Excel** scrivi ogni quante ore generare il report (es. 24 = una volta al giorno; 0 = spento) e premi **Salva**. Il file contiene tutte le consegne aperte con i dati del cliente e la situazione: da confermare, confermata o da chiudere. I report restano scaricabili nella stessa pagina; se l'email è collegata arrivano anche per email con il file allegato. **Genera adesso** ne crea uno subito.
+
 Finché WhatsApp ed email non sono collegati, i messaggi non partono. Puoi comunque premere **Crea link** nell'anteprima e mandare il link al cliente a mano.
 
 ## 5. Collegare WhatsApp ed email (quando sono pronti)

@@ -98,3 +98,11 @@ export const saveArea = (db: Db, t: string, a: AreaSetting) => put(db, t, 'area'
 export const getBooking = (db: Db, t: string) =>
   get<BookingSetting>(db, t, 'booking', { horizon: config.BOOKING_HORIZON_DAYS, lead: config.BOOKING_LEAD_DAYS });
 export const saveBooking = (db: Db, t: string, b: BookingSetting) => put(db, t, 'booking', b);
+
+/* ---------- report Excel periodico ---------- */
+
+/** hours: ogni quante ore generare il report (0 = spento). email: mandarlo anche per email. to: destinatario (vuoto = email dell'ambiente). */
+export interface ReportSetting { hours: number; email: boolean; to: string }
+export const REPORT_DEFAULT: ReportSetting = { hours: 0, email: true, to: '' };
+export const getReportSetting = (db: Db, t: string) => get<ReportSetting>(db, t, 'report', { ...REPORT_DEFAULT });
+export const saveReportSetting = (db: Db, t: string, r: ReportSetting) => put(db, t, 'report', r);

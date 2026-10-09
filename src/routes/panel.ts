@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { pool, tx } from '../lib/db.js';
+import { emailEnabled } from '../config.js';
 import { addDays, hhmm, todayLocal } from '../lib/dates.js';
 import { DomainError } from '../lib/errors.js';
 import { actorOf, requireOperator, tenantOf } from '../lib/auth.js';
@@ -13,6 +14,9 @@ import {
   getArea, getBooking, getMessages, parseArea, saveArea, saveBooking, saveMessages, validateMessages, MESSAGE_DEFAULTS, type Messages,
 } from '../domain/settings.js';
 import { createToken, customerUrl } from '../domain/tokens.js';
+import { getReportSetting, saveReportSetting } from '../domain/settings.js';
+import { openSlots, parseWorkbook, personKey, planSlots, templateWorkbook, type ImportRow, type PlannedRow } from '../domain/importer.js';
+import { createReport, getReportFile, listReports } from '../domain/report.js';
 import { enqueue } from '../jobs/queue.js';
 
 /**
@@ -69,6 +73,29 @@ async function slotIdFor(tenantId: string, date: string, band: string) {
   return r.rows[0].id;
 }
 
+/** Numero d'ordine generato quando non viene indicato. */
+async function newOrderRef(tenantId: string, taken?: Set<string>) {
+  for (;;) {
+    const ref = `ORD-${Math.floor(100000 + Math.random() * 899999)}`;
+    if (taken?.has(ref.toLowerCase())) continue;
+    const r = await pool.query('SELECT 1 FROM deliveries WHERE tenant_id = $1 AND order_ref = $2', [tenantId, ref]);
+    if (!r.rowCount) { taken?.add(ref.toLowerCase()); return ref; }
+  }
+}
+async function existingRefs(tenantId: string) {
+  const r = await pool.query<{ ref: string }>('SELECT lower(order_ref) AS ref FROM deliveries WHERE tenant_id = $1', [tenantId]);
+  return new Set(r.rows.map((x) => x.ref));
+}
+/** Clienti con una consegna ancora aperta (per riconoscere i doppioni senza numero d'ordine). */
+async function openPeople(tenantId: string) {
+  const r = await pool.query<{ name: string; address: string }>(
+    `SELECT c.name, d.address FROM deliveries d JOIN customers c ON c.id = d.customer_id
+      WHERE d.tenant_id = $1 AND d.status NOT IN ('delivered','cancelled')`, [tenantId]);
+  return new Set(r.rows.map((x) => personKey(x.name, x.address)));
+}
+const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+const attachment = (name: string) => `attachment; filename="${name.replace(/[^\w.\-]/g, '_')}"`;
+
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const time = z.string().regex(/^\d{2}:\d{2}$/);
 const idParam = z.object({ id: z.string().uuid() });
@@ -106,7 +133,7 @@ export async function panelRoutes(app: FastifyInstance) {
     const phone = b.phone ? b.phone.replace(/[^\d+]/g, '').replace(/^(?!\+)/, '+39') : null;
     const t = tenantOf(req);
     const id = await createDelivery(t, {
-      order_ref: `VK-${Math.floor(10000 + Math.random() * 89999)}`,
+      order_ref: await newOrderRef(t),
       customer: { name: b.name, phone_e164: phone, email: b.email || null, consent_whatsapp: Boolean(phone) },
       address: b.address, cap: b.cap, product: b.product || null,
       slot_id: await slotIdFor(t, b.date, b.bandId),
@@ -197,6 +224,89 @@ export async function panelRoutes(app: FastifyInstance) {
       const r = await generateSlots(c, t);
       return { overbooked: r.overbooked.map((s) => ({ date: s.date, bandId: bandId(s.start_time, s.end_time), booked: s.booked, capacity: s.capacity })) };
     });
+  });
+
+  /* ---------- importazione da Excel ---------- */
+
+  app.get('/import/template', async (req, reply) => {
+    const sch = await getSchedule(tenantOf(req));
+    const buf = await templateWorkbook(sch.bands.map((b) => b.id));
+    return reply.header('content-type', XLSX).header('content-disposition', attachment('modello_consegne.xlsx')).send(buf);
+  });
+
+  /** Legge il file e mostra cosa verrà inviato, senza creare nulla. */
+  app.post('/import/preview', { bodyLimit: 15 * 1024 * 1024 }, async (req) => {
+    const b = z.object({ file: z.string().min(1).max(14 * 1024 * 1024) }).parse(req.body);
+    const t = tenantOf(req);
+    let parsed;
+    try { parsed = await parseWorkbook(Buffer.from(b.file, 'base64')); }
+    catch (err) { throw new DomainError('invalid_file', (err as Error).message, 422); }
+    if (parsed.missing.length) throw new DomainError('missing_columns', `Nel file mancano le colonne: ${parsed.missing.join(', ')}. Scarica il modello per vedere come deve essere.`, 422);
+    const planned = planSlots(parsed.rows, await openSlots(pool, t), await existingRefs(t), await openPeople(t));
+    const rows: PlannedRow[] = [...planned, ...parsed.errors].sort((a, b2) => a.line - b2.line);
+    if (!rows.length) throw new DomainError('empty_file', 'Il file non contiene consegne: sotto le intestazioni non ci sono righe compilate.', 422);
+    return { rows, ok: rows.filter((r) => !r.errors.length).length };
+  });
+
+  /** Crea le consegne valide e invia a tutti il messaggio. Le fasce vengono ricontrollate al momento. */
+  app.post('/import/commit', async (req) => {
+    const row = z.object({
+      line: z.number().int(), name: z.string().trim().min(1).max(200), address: z.string().trim().min(3).max(300),
+      cap: z.string().regex(/^\d{5}$/), phone: z.string().regex(/^(\+\d{8,15})?$/), email: z.string().max(200),
+      product: z.string().max(120), order_ref: z.string().max(60),
+      date: isoDate.nullable(), band: time.nullable(),
+    }).refine((r) => r.phone || r.email, 'Serve almeno un contatto');
+    const b = z.object({ rows: z.array(row).min(1).max(1000) }).parse(req.body);
+    const t = tenantOf(req), actor = `${actorOf(req)} (Excel)`;
+    const refs = await existingRefs(t), people = await openPeople(t);
+    const results: { line: number; ok: boolean; error?: string; name: string; slot?: { date: string; bandId: string } }[] = [];
+    for (const r of b.rows as ImportRow[]) {
+      // ricalcola lo slot con i posti di adesso (nel frattempo altri potrebbero averli presi)
+      const [plan] = planSlots([r], await openSlots(pool, t), refs, people);
+      if (!plan || plan.errors.length || !plan.slot) { results.push({ line: r.line, ok: false, name: r.name, error: plan?.errors.join('; ') || 'non inviata' }); continue; }
+      try {
+        const ref = r.order_ref || await newOrderRef(t, refs);
+        const id = await createDelivery(t, {
+          order_ref: ref,
+          customer: { name: r.name, phone_e164: r.phone || null, email: r.email || null, consent_whatsapp: Boolean(r.phone) },
+          address: r.address, cap: r.cap, product: r.product || null,
+          slot_id: await slotIdFor(t, plan.slot.date, plan.slot.bandId),
+        }, actor);
+        refs.add(ref.toLowerCase()); people.add(personKey(r.name, r.address));
+        await enqueue.proposal(id);
+        results.push({ line: r.line, ok: true, name: r.name, slot: plan.slot });
+      } catch (err) {
+        results.push({ line: r.line, ok: false, name: r.name, error: err instanceof DomainError ? err.message : 'errore imprevisto' });
+      }
+    }
+    return { sent: results.filter((x) => x.ok).length, results };
+  });
+
+  /* ---------- report Excel periodico ---------- */
+
+  app.get('/reports', async (req) => {
+    const t = tenantOf(req);
+    const tenant = (await pool.query<{ email: string }>('SELECT email FROM tenants WHERE id = $1', [t])).rows[0];
+    return { setting: await getReportSetting(pool, t), tenantEmail: tenant?.email ?? '', emailReady: emailEnabled(), reports: await listReports(pool, t) };
+  });
+
+  app.put('/reports/setting', async (req) => {
+    const b = z.object({
+      hours: z.number().int().min(0, 'Minimo 1 ora (0 per spegnere)').max(720, 'Massimo 720 ore (30 giorni)'),
+      email: z.boolean(),
+      to: z.string().trim().max(200).refine((v) => !v || z.string().email().safeParse(v).success, 'Email del destinatario non valida'),
+    }).parse(req.body);
+    await saveReportSetting(pool, tenantOf(req), b);
+    return b;
+  });
+
+  app.post('/reports', async (req) => createReport(pool, tenantOf(req), 'manual'));
+
+  app.get('/reports/:id', async (req, reply) => {
+    const { id } = idParam.parse(req.params);
+    const f = await getReportFile(pool, tenantOf(req), id);
+    if (!f) throw new DomainError('not_found', 'Report non trovato.', 404);
+    return reply.header('content-type', XLSX).header('content-disposition', attachment(f.filename)).send(f.data);
   });
 
   app.put('/area', async (req) => {

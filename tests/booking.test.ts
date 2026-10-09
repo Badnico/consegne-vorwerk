@@ -7,6 +7,10 @@ import { createDelivery, declineDelivery, bookSlot, confirmDelivery, getDelivery
 import { saveArea, getMessages, fillText } from '../src/domain/settings.js';
 import { messageVars } from '../src/notify/notifier.js';
 import { fromAddress } from '../src/notify/email.js';
+import ExcelJS from 'exceljs';
+import { openSlots, parseWorkbook, planSlots } from '../src/domain/importer.js';
+import { createReport, getReportFile, listReports, runDueReports, situationOf } from '../src/domain/report.js';
+import { saveReportSetting } from '../src/domain/settings.js';
 import { createTenant, updateTenant } from '../src/domain/tenants.js';
 import { loginTenant } from '../src/lib/auth.js';
 import { addDays, todayLocal } from '../src/lib/dates.js';
@@ -31,7 +35,7 @@ const booked = async (id: string) => (await pool.query<{ booked: number }>('SELE
 
 before(async () => {
   await migrate();
-  await pool.query('TRUNCATE delivery_events, messages, access_tokens, deliveries, customers, slots, slot_overrides, slot_templates, settings, sessions, operators, tenants CASCADE');
+  await pool.query('TRUNCATE reports, delivery_events, messages, access_tokens, deliveries, customers, slots, slot_overrides, slot_templates, settings, sessions, operators, tenants CASCADE');
   const end = addDays(todayLocal(), 30);
   T = await createTenant({ name: 'Uno', slug: 'uno', username: 'uno', password: 'password-lunga-1', email: 'uno@example.it', subscription_end: end });
   T2 = await createTenant({ name: 'Due', slug: 'due', username: 'due', password: 'password-lunga-2', email: 'due@example.it', subscription_end: end });
@@ -160,4 +164,110 @@ test("modo A: ogni messaggio porta il nome dell'azienda dell'ambiente", async ()
   assert.match(fillText(m.mail_subject, v), /^Uno: la tua consegna /);
   assert.equal(fromAddress('Vorwerk Consegne <consegne@esempio.it>'), 'consegne@esempio.it');
   assert.equal(fromAddress('consegne@esempio.it'), 'consegne@esempio.it');
+});
+
+test('Excel: intestazioni con sinonimi, CAP e telefono numerici, date e fasce in vari formati, righe con errori', async () => {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Foglio1');
+  ws.addRow(['Elenco consegne settimana']); // titolo sopra l'intestazione
+  ws.addRow(['Nome', 'Cognome', 'Indirizzo', 'Città', 'C.A.P.', 'Cellulare', 'E-mail', 'Prodotto', 'N. ordine', 'Data consegna', 'Fascia oraria']);
+  ws.addRow(['Anna', 'Neri', 'Via Verdi 2', 'Milano', 2121, 3331234567, '', 'Bimby', 'X-1', new Date(Date.UTC(2030, 0, 15)), '8-11']);
+  ws.addRow(['Bruno', 'Galli', 'Corso Como 5, Milano', '', '201', '', 'bruno@example.it', '', '', '', '']);
+  ws.addRow([]);
+  ws.addRow(['Carla', '', 'Via Po 9', 'Torino', '10121', '', '', '', '', '', '']);
+  ws.addRow(['Dario', 'Russo', 'Via Manzoni 1', 'Milano', '20121', '+39 340 111 2222', 'dario@example.it', '', 'X-2', '31/02/2030', '']);
+  ws.addRow(['Elena', 'Costa', 'Via Dante 7', 'Milano', '20122', '0039 347 5556666', '', '', '', '20/01/30', '14:00']);
+  const { rows, errors, missing } = await parseWorkbook(Buffer.from(await wb.xlsx.writeBuffer()));
+  assert.deepEqual(missing, []);
+  assert.equal(rows.length, 2);
+  assert.equal(errors.length, 3);
+  const anna = rows.find((r) => r.name === 'Anna Neri')!;
+  assert.equal(anna.address, 'Via Verdi 2, Milano');
+  assert.equal(anna.cap, '02121');
+  assert.equal(anna.phone, '+393331234567');
+  assert.equal(anna.date, '2030-01-15');
+  assert.equal(anna.band, '08:00');
+  assert.equal(anna.order_ref, 'X-1');
+  const elena = rows.find((r) => r.name === 'Elena Costa')!;
+  assert.equal(elena.phone, '+393475556666');
+  assert.equal(elena.date, '2030-01-20');
+  assert.equal(elena.band, '14:00');
+  assert.match(errors.find((e) => e.name === 'Bruno Galli')!.errors.join(), /CAP non valido/);
+  assert.match(errors.find((e) => e.name === 'Carla')!.errors.join(), /telefono o email/);
+  assert.match(errors.find((e) => e.name === 'Dario Russo')!.errors.join(), /data non valida/);
+});
+
+test('Excel: le fasce proposte rispettano la capienza, anche tra righe dello stesso file', async () => {
+  const open = { first: '2030-01-02', slots: [
+    { id: 'a', date: '2030-01-01', start: '08:00', end: '11:00', free: 5 }, // prima del preavviso: solo se chiesta
+    { id: 'b', date: '2030-01-02', start: '08:00', end: '11:00', free: 1 },
+    { id: 'c', date: '2030-01-02', start: '11:00', end: '14:00', free: 1 },
+    { id: 'd', date: '2030-01-03', start: '08:00', end: '11:00', free: 0 },
+  ] };
+  const base = { name: 'X', address: 'Via 1', cap: '20121', phone: '+393331112222', email: '', product: '' };
+  const plan = planSlots([
+    { ...base, line: 2, order_ref: 'A1', date: null, band: null },
+    { ...base, line: 3, order_ref: 'A2', date: null, band: null },
+    { ...base, line: 4, order_ref: 'A3', date: null, band: null },
+    { ...base, line: 5, order_ref: 'a1', date: '2030-01-01', band: '08:00' },
+    { ...base, line: 6, order_ref: 'OLD', date: '2030-01-01', band: null },
+    { ...base, line: 7, order_ref: '', date: '2030-01-03', band: '08:00' },
+  ], open, new Set(['old']));
+  assert.deepEqual(plan[0]!.slot, { date: '2030-01-02', bandId: '08:00-11:00' });
+  assert.deepEqual(plan[1]!.slot, { date: '2030-01-02', bandId: '11:00-14:00' });
+  assert.match(plan[2]!.errors.join(), /nessuna fascia libera/);
+  assert.match(plan[3]!.errors.join(), /ripetuto nel file/);
+  assert.match(plan[4]!.errors.join(), /già nel sistema/);
+  assert.match(plan[5]!.errors.join(), /piena/);
+});
+
+test('report Excel: situazioni da confermare, confermate e da chiudere', async () => {
+  const open = await openSlots(pool, T2);
+  const s0 = open.slots.find((s) => s.free > 0 && s.date >= open.first)!;
+  const mk = async () => createDelivery(T2, { order_ref: order(), customer, address: 'Via Report 1, Milano', cap: '20121', slot_id: s0.id }, 'test');
+  const a = await mk(), b2 = await mk(), c = await mk();
+  await confirmDelivery(b2, 'test', T2);
+  await confirmDelivery(c, 'test', T2);
+  // c: data passata → da chiudere
+  const past = await pool.query<{ id: string }>(`INSERT INTO slots (tenant_id, date, start_time, end_time, capacity, booked) VALUES ($1, $2, '07:00', '08:00', 5, 1) RETURNING id`, [T2, addDays(todayLocal(), -1)]);
+  await pool.query('UPDATE deliveries SET slot_id = $1 WHERE id = $2', [past.rows[0]!.id, c]);
+  assert.equal(situationOf(await getDelivery(pool, a, T2)), 'Da confermare');
+  assert.equal(situationOf(await getDelivery(pool, b2, T2)), 'Confermata');
+  assert.equal(situationOf(await getDelivery(pool, c, T2)), 'Da chiudere');
+
+  const rep = await createReport(pool, T2, 'manual');
+  assert.equal(rep.counts['Da confermare'], 1);
+  assert.equal(rep.counts.Confermata, 1);
+  assert.equal(rep.counts['Da chiudere'], 1);
+  assert.equal((await listReports(pool, T2))[0]!.id, rep.id);
+  assert.equal(await getReportFile(pool, T, rep.id), null); // non visibile da un altro ambiente
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load((await getReportFile(pool, T2, rep.id))!.data as unknown as ArrayBuffer);
+  const ws = wb.getWorksheet('Consegne')!;
+  assert.equal(ws.rowCount, 4);
+  assert.equal(ws.getRow(2).getCell(1).value, 'Da chiudere');
+  assert.equal(ws.getRow(2).getCell(4).value, 'Giulia Ferri');
+});
+
+test('report automatico: parte quando sono passate le ore impostate, non prima', async () => {
+  await saveReportSetting(pool, T, { hours: 0, email: false, to: '' });
+  assert.equal(await runDueReports(pool, [T]), 0); // spento
+  await saveReportSetting(pool, T, { hours: 2, email: false, to: '' });
+  assert.equal(await runDueReports(pool, [T]), 1); // primo report
+  assert.equal(await runDueReports(pool, [T]), 0); // troppo presto
+  await pool.query("UPDATE reports SET created_at = now() - interval '2 hours' WHERE tenant_id = $1", [T]);
+  assert.equal(await runDueReports(pool, [T]), 1);
+});
+
+test('Excel: senza numero d\'ordine riconosce i doppioni da nome e indirizzo', () => {
+  const open = { first: '2030-01-02', slots: [{ id: 'b', date: '2030-01-02', start: '08:00', end: '11:00', free: 9 }] };
+  const base = { address: 'Via 1, Milano', cap: '20121', phone: '+393331112222', email: '', product: '', order_ref: '', date: null, band: null };
+  const plan = planSlots([
+    { ...base, line: 2, name: 'Anna Neri' },
+    { ...base, line: 3, name: 'anna neri ' },
+    { ...base, line: 4, name: 'Bruno Galli' },
+  ], open, new Set(), new Set(['bruno galli|via 1 milano']));
+  assert.equal(plan[0]!.errors.length, 0);
+  assert.match(plan[1]!.errors.join(), /ripetuti nel file/);
+  assert.match(plan[2]!.errors.join(), /già una consegna aperta/);
 });

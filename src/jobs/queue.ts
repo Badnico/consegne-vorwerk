@@ -3,6 +3,7 @@ import { config } from '../config.js';
 import { pool } from '../lib/db.js';
 import { getDelivery, incrementReminders, markNoResponse, type Status } from '../domain/deliveries.js';
 import { activeTenantIds, generateSlots } from '../domain/slots.js';
+import { runDueReports } from '../domain/report.js';
 import { sendConfirmation, sendOutOfArea, sendProposal, sendRescheduleLink } from '../notify/notifier.js';
 
 /**
@@ -16,6 +17,7 @@ export const Q = {
   afterConfirm: 'after-confirm',
   expire: 'expire-delivery',
   slots: 'generate-slots',
+  reports: 'periodic-reports',
 } as const;
 
 type IdJob = { deliveryId: string };
@@ -94,4 +96,11 @@ async function registerWorkers(b: PgBoss) {
     }
   });
   await b.schedule(Q.slots, '15 2 * * *', {}, { tz: config.TIMEZONE });
+
+  // Report Excel: ogni 10 minuti controlla quali ambienti hanno superato le ore impostate
+  await b.work(Q.reports, async () => {
+    const n = await runDueReports(pool, await activeTenantIds(pool));
+    if (n) console.log(`[report] generati ${n} report`);
+  });
+  await b.schedule(Q.reports, '*/10 * * * *', {}, { tz: config.TIMEZONE });
 }

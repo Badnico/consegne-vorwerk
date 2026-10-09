@@ -15,9 +15,11 @@ export const fromAddress = (from: string) => (from.match(/<([^>]+)>/)?.[1] ?? fr
  * Tutte le email partono dallo stesso indirizzo (EMAIL_FROM), ma con il nome dell'azienda come mittente
  * ("Rossi Elettrodomestici <consegne@...>") e con "Rispondi a" verso l'email dell'azienda.
  */
-export async function sendEmail(sender: { name: string; replyTo?: string }, to: string, subject: string, text: string, html: string): Promise<string> {
+export interface Attachment { filename: string; content: Buffer; contentType?: string }
+
+export async function sendEmail(sender: { name: string; replyTo?: string }, to: string, subject: string, text: string, html: string, attachments?: Attachment[]): Promise<string> {
   const from = { name: sender.name.replace(/[\r\n"<>]/g, ' ').trim() || 'Consegne', address: fromAddress(config.EMAIL_FROM) };
-  const info = await getTransport().sendMail({ from, replyTo: sender.replyTo || undefined, to, subject, text, html });
+  const info = await getTransport().sendMail({ from, replyTo: sender.replyTo || undefined, to, subject, text, html, attachments });
   return info.messageId;
 }
 

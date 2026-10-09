@@ -18,6 +18,7 @@
     "test": "node --env-file-if-exists=.env --import tsx --test tests/*.test.ts"
   },
   "dependencies": {
+    "exceljs": "^4.4.0",
     "fastify": "^5.2.1",
     "nodemailer": "^10.0.16",
     "pg": "^8.13.1",
@@ -30,5 +31,8 @@
     "@types/pg": "^8.11.10",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3"
+  },
+  "overrides": {
+    "uuid": "^11.1.1"
   }
 }
