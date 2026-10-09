@@ -4,7 +4,7 @@ import { DomainError, invalidState, notFound, slotFull } from '../lib/errors.js'
 import { todayLocal } from '../lib/dates.js';
 import { getSlot, release, reserve, bookingWindow } from './slots.js';
 import { extendToken } from './tokens.js';
-import { getArea, inArea } from './settings.js';
+import { canSelfBook, getArea } from './settings.js';
 
 export type Status =
   | 'proposed' | 'confirmed' | 'to_reschedule' | 'rescheduled'
@@ -146,7 +146,7 @@ export async function declineDelivery(id: string, actor = 'customer', tenantId?:
   return tx(async (c) => {
     const row = await lockFor(c, id, ['proposed', 'confirmed', 'rescheduled', 'no_response'], 'rifiuto', tenantId);
     if (row.slot_id) await release(c, row.slot_id);
-    const next: Status = inArea(await getArea(c, row.tenant_id), row.cap) ? 'to_reschedule' : 'out_of_area';
+    const next: Status = canSelfBook(await getArea(c, row.tenant_id), row.cap) ? 'to_reschedule' : 'out_of_area';
     await c.query(`UPDATE deliveries SET status = $2, slot_id = NULL, updated_at = now() WHERE id = $1`, [id, next]);
     await logEvent(c, id, row.status, next, actor, next === 'out_of_area' ? `CAP ${row.cap ?? 'mancante'} fuori area` : undefined);
     return next;
@@ -174,7 +174,7 @@ export async function bookSlot(id: string, slotId: string, actor = 'customer', o
     } else {
       const win = await bookingWindow(c, row.tenant_id);
       if (slot.date < win.from || slot.date > win.to) throw new DomainError('slot_not_bookable', 'Questo slot non è prenotabile.', 422);
-      if (!inArea(await getArea(c, row.tenant_id), row.cap)) throw new DomainError('out_of_area', 'Per questo indirizzo la data va concordata con un operatore.', 422);
+      if (!canSelfBook(await getArea(c, row.tenant_id), row.cap)) throw new DomainError('out_of_area', 'Per questo indirizzo la data va concordata con un operatore.', 422);
     }
     if (row.slot_id !== slotId) {
       if (!(await reserve(c, slotId))) throw slotFull();
@@ -207,7 +207,7 @@ export async function markFailedLetCustomerChoose(id: string, actor: string, ten
   return tx(async (c) => {
     const row = await lockFor(c, id, ['confirmed', 'rescheduled'], 'non consegnata', tenantId);
     if (row.slot_id) await release(c, row.slot_id);
-    const next: Status = inArea(await getArea(c, row.tenant_id), row.cap) ? 'to_reschedule' : 'out_of_area';
+    const next: Status = canSelfBook(await getArea(c, row.tenant_id), row.cap) ? 'to_reschedule' : 'out_of_area';
     await c.query(
       `UPDATE deliveries SET status = $2, slot_id = NULL, failed_attempts = failed_attempts + 1, updated_at = now() WHERE id = $1`,
       [id, next],

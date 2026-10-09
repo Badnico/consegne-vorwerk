@@ -4,7 +4,7 @@ import { pool } from '../src/lib/db.js';
 import { migrate } from '../src/lib/migrate.js';
 import { bookingWindow } from '../src/domain/slots.js';
 import { createDelivery, declineDelivery, bookSlot, confirmDelivery, getDelivery, markDelivered, markFailedLetCustomerChoose, deleteDelivery } from '../src/domain/deliveries.js';
-import { saveArea, getMessages, fillText } from '../src/domain/settings.js';
+import { canSelfBook, saveArea, getMessages, fillText } from '../src/domain/settings.js';
 import { messageVars } from '../src/notify/notifier.js';
 import { fromAddress } from '../src/notify/email.js';
 import ExcelJS from 'exceljs';
@@ -272,4 +272,15 @@ test('Excel: senza numero d\'ordine riconosce i doppioni da nome e indirizzo', (
   assert.equal(plan[0]!.errors.length, 0);
   assert.match(plan[1]!.errors.join(), /ripetuti nel file/);
   assert.match(plan[2]!.errors.join(), /già una consegna aperta/);
+});
+
+test('"Se clicca NO va richiamato": tutti quelli che dicono No passano all\'operatore', async () => {
+  assert.equal(canSelfBook({ on: false, list: '', callAll: true }, '20121'), false);
+  assert.equal(canSelfBook({ on: false, list: '' }, '20121'), true);
+  await saveArea(pool, T, { on: false, list: '', callAll: true });
+  const a = await slot('21:00', 3);
+  const id = await createDelivery(T, { order_ref: order(), customer, address: 'Via Roma 1, Milano', cap: '20121', slot_id: a }, 'test');
+  assert.equal(await declineDelivery(id, 'customer', T), 'out_of_area');
+  await assert.rejects(bookSlot(id, a, 'customer')); // il cliente non sceglie da solo
+  await saveArea(pool, T, { on: false, list: '', callAll: false });
 });

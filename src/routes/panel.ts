@@ -313,7 +313,7 @@ export async function panelRoutes(app: FastifyInstance) {
   });
 
   app.put('/area', async (req) => {
-    const b = z.object({ on: z.boolean(), list: z.string().max(20000) }).parse(req.body);
+    const b = z.object({ on: z.boolean(), list: z.string().max(20000), callAll: z.boolean().optional().default(false) }).parse(req.body);
     const { bad } = parseArea(b.list);
     if (bad.length) throw new DomainError('invalid_area', `Non riconosciuto: ${bad.slice(0, 3).join(', ')}.`, 422);
     await saveArea(pool, tenantOf(req), b);

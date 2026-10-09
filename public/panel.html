@@ -387,7 +387,7 @@ a.btn{text-decoration:none;color:inherit;display:inline-flex;align-items:center}
         <p class="note">Quando il cliente risponde No, il sistema guarda il CAP dell'indirizzo. Dentro l'area può scegliere da solo la nuova data dal calendario; fuori riceve un messaggio diverso e la consegna passa all'operatore. Il testo per chi è fuori area si modifica nella scheda Messaggi.</p>
         <fieldset>
           <legend>CAP serviti</legend>
-          <div class="days"><label><input type="checkbox" id="areaOn"> Attiva il controllo dell'area</label></div>
+          <div class="days"><label><input type="checkbox" id="areaOn"> Attiva il controllo dell'area</label><label title="Chi risponde No riceve il messaggio per chi è fuori area e lo richiama un operatore"><input type="checkbox" id="areaCall"> Se clicca NO va richiamato</label></div>
           <label class="f">Un CAP, un intervallo o un prefisso per riga (o separati da virgole)<textarea id="areaList" rows="6" class="mono" spellcheck="false"></textarea></label>
           <p class="hint note"><span class="mono">20121</span> un solo CAP · <span class="mono">20121-20162</span> tutti i CAP compresi · <span class="mono">201*</span> tutti i CAP che iniziano con 201</p>
           <p class="err" id="areaErr" hidden></p>
@@ -553,8 +553,8 @@ function inAreaWith(a, cap){
 const inArea = cap => inAreaWith(area, cap);
 const capOf = x => x.cap || (/\b(\d{5})\b/.exec(x.address || '') || [])[1] || '';
 
-function readArea(){ return {on: $('areaOn').checked, list: $('areaList').value}; }
-function renderAreaEditor(){ $('areaOn').checked = area.on; $('areaList').value = area.list; areaDirty = false; updateArea(); }
+function readArea(){ return {on: $('areaOn').checked, list: $('areaList').value, callAll: $('areaCall').checked}; }
+function renderAreaEditor(){ $('areaOn').checked = area.on; $('areaCall').checked = !!area.callAll; $('areaList').value = area.list; areaDirty = false; updateArea(); }
 function updateArea(){
   const a = readArea(), {rules, bad} = parseArea(a.list);
   $('areaErr').textContent = bad.length ? `Non riconosciuto: ${bad.slice(0,3).join(', ')}. Usa 20121, 20121-20162 oppure 201*.` : '';
@@ -562,18 +562,20 @@ function updateArea(){
   $('saveArea').disabled = bad.length > 0;
   const withCap = deliveries.filter(x => ACTIVE.has(x.status) || x.status === 'da_riprogrammare');
   const inside = withCap.filter(x => inAreaWith(a, capOf(x))).length;
-  $('areaSum').innerHTML = !a.on ? '<span class="stat">Controllo spento: tutti i clienti possono scegliere la data</span>'
+  $('areaSum').innerHTML = a.callAll ? '<span class="stat s-fuori_area"><i class="dot"></i>Se clicca NO va richiamato: chi risponde No riceve il messaggio "Risposta dopo il rifiuto, fuori area" e lo richiami tu. Nessun cliente sceglie la data da solo.</span>'
+    : !a.on ? '<span class="stat">Controllo spento: tutti i clienti possono scegliere la data</span>'
     : !rules.length ? '<span class="stat">Nessun CAP inserito: tutti i clienti possono scegliere la data</span>'
     : `<span class="stat"><b>${rules.length}</b> ${rules.length === 1 ? 'regola' : 'regole'}</span><span class="stat s-confermato"><i class="dot"></i>Consegne attive dentro l'area <b>${inside}</b></span><span class="stat s-fuori_area"><i class="dot"></i>Fuori area <b>${withCap.length - inside}</b></span>`;
   const t = $('areaTest').value.trim(), out = $('areaTestOut');
   out.className = 'capout';
   if (!t) out.textContent = '';
   else if (!/^\d{5}$/.test(t)) out.textContent = 'Il CAP ha 5 cifre';
+  else if (a.callAll){ out.textContent = 'Se dice No va richiamato: riceve il messaggio per chi è fuori area'; out.classList.add('out'); }
   else if (inAreaWith(a, t)){ out.textContent = 'Dentro l\'area: sceglie la data dal calendario'; out.classList.add('in'); }
   else { out.textContent = 'Fuori area: riceve il messaggio dedicato'; out.classList.add('out'); }
 }
 $('p-area').addEventListener('input', e => { if (e.target.id !== 'areaTest') areaDirty = true; updateArea(); });
-$('p-area').addEventListener('change', e => { if (e.target.id === 'areaOn'){ areaDirty = true; updateArea(); } });
+$('p-area').addEventListener('change', e => { if (e.target.id === 'areaOn' || e.target.id === 'areaCall'){ areaDirty = true; updateArea(); } });
 $('undoArea').onclick = () => { renderAreaEditor(); toast('Modifiche annullate'); };
 $('saveArea').onclick = async () => {
   const a = readArea(); if (parseArea(a.list).bad.length) return;
@@ -621,7 +623,7 @@ const MSG_FIELDS = [
     {k:'wa_confirmed', label:'Risposta dopo la conferma', st:'confermato', rows:2},
     {k:'wa_declined', label:'Risposta dopo il rifiuto', st:'da_riprogrammare', rows:3, req:['link'], hint:'Deve contenere {link}: è il collegamento per scegliere la nuova data.'},
     {k:'wa_rescheduled', label:'Conferma della nuova data', st:'riprogrammato', rows:2},
-    {k:'wa_out_area', label:'Risposta dopo il rifiuto, fuori area', st:'fuori_area', rows:3, hint:'Lo riceve chi risponde No ma ha un CAP fuori dall\'area servita.'},
+    {k:'wa_out_area', label:'Risposta dopo il rifiuto, fuori area', st:'fuori_area', rows:3, hint:'Lo riceve chi risponde No ma ha un CAP fuori dall\'area servita, oppure tutti quelli che rispondono No se in "Area servita" è spuntato "Se clicca NO va richiamato".'},
   ]},
   {g:'Email', ch:'mail', items:[
     {k:'mail_subject', label:'Oggetto', st:'inviato', max:120},

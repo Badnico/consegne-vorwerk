@@ -48,8 +48,9 @@ export function validateMessages(m: Record<string, unknown>): string | null {
 
 /* ---------- area servita ---------- */
 
-export interface AreaSetting { on: boolean; list: string }
-export const AREA_DEFAULT: AreaSetting = { on: false, list: '' };
+/** callAll: "Se clicca NO va richiamato": chi risponde No riceve sempre il messaggio "fuori area" e lo richiama un operatore. */
+export interface AreaSetting { on: boolean; list: string; callAll?: boolean }
+export const AREA_DEFAULT: AreaSetting = { on: false, list: '', callAll: false };
 
 export function parseArea(text: string) {
   const rules: { a: string; b: string }[] = [], bad: string[] = [];
@@ -71,6 +72,11 @@ export function inArea(area: AreaSetting, cap: string | null | undefined): boole
   const { rules } = parseArea(area.list);
   if (!rules.length) return true;
   return /^\d{5}$/.test(cap ?? '') && rules.some((r) => cap! >= r.a && cap! <= r.b);
+}
+
+/** Può scegliere da solo la nuova data? No se l'operatore deve richiamare tutti o se il CAP è fuori area. */
+export function canSelfBook(area: AreaSetting, cap: string | null | undefined): boolean {
+  return !area.callAll && inArea(area, cap);
 }
 
 /* ---------- finestra di prenotazione ---------- */
