@@ -1,5 +1,6 @@
 import PgBoss from 'pg-boss';
 import { config } from '../config.js';
+import { DomainError } from '../lib/errors.js';
 import { pool } from '../lib/db.js';
 import { getDelivery, incrementReminders, markNoResponse, type Status } from '../domain/deliveries.js';
 import { activeTenantIds, generateSlots } from '../domain/slots.js';
@@ -52,14 +53,22 @@ export const enqueue = {
   afterConfirm: (deliveryId: string) => q().send(Q.afterConfirm, { deliveryId }, retry),
 };
 
+/** Una consegna eliminata dal pannello non deve far fallire (e ritentare) i suoi invii in coda. */
+function safe<T>(handler: (jobs: PgBoss.Job<T>[]) => Promise<void>) {
+  return async (jobs: PgBoss.Job<T>[]) => {
+    try { await handler(jobs); }
+    catch (err) { if (err instanceof DomainError && err.code === 'not_found') return; throw err; }
+  };
+}
+
 async function registerWorkers(b: PgBoss) {
-  await b.work<IdJob>(Q.proposal, async ([job]) => {
+  await b.work<IdJob>(Q.proposal, safe(async ([job]) => {
     const id = job!.data.deliveryId;
     await sendProposal(id, 'proposal');
     await b.send(Q.reminder, { deliveryId: id }, { ...retry, startAfter: hours(config.REMINDER_AFTER_HOURS) });
-  });
+  }));
 
-  await b.work<IdJob>(Q.reminder, async ([job]) => {
+  await b.work<IdJob>(Q.reminder, safe(async ([job]) => {
     const id = job!.data.deliveryId;
     const d = await getDelivery(pool, id);
     if (d.status !== 'proposed') return;
@@ -67,27 +76,27 @@ async function registerWorkers(b: PgBoss) {
     await incrementReminders(id);
     const wait = Math.max(config.NO_RESPONSE_AFTER_HOURS - config.REMINDER_AFTER_HOURS, 1);
     await b.send(Q.expire, { deliveryId: id, ifStatus: 'proposed' } satisfies ExpireJob, { startAfter: hours(wait) });
-  });
+  }));
 
-  await b.work<IdJob>(Q.afterDecline, async ([job]) => {
+  await b.work<IdJob>(Q.afterDecline, safe(async ([job]) => {
     const id = job!.data.deliveryId;
     const d = await getDelivery(pool, id);
     if (d.status === 'out_of_area') { await sendOutOfArea(id); return; } // ci pensa l'operatore
     if (d.status !== 'to_reschedule') return;
     await sendRescheduleLink(id);
     await b.send(Q.expire, { deliveryId: id, ifStatus: 'to_reschedule' } satisfies ExpireJob, { startAfter: hours(config.NO_RESPONSE_AFTER_HOURS) });
-  });
+  }));
 
-  await b.work<IdJob>(Q.afterConfirm, async ([job]) => {
+  await b.work<IdJob>(Q.afterConfirm, safe(async ([job]) => {
     await sendConfirmation(job!.data.deliveryId);
-  });
+  }));
 
   // Scade solo se la consegna è ancora nello stato in cui era quando il job è stato creato
-  await b.work<ExpireJob>(Q.expire, async ([job]) => {
+  await b.work<ExpireJob>(Q.expire, safe(async ([job]) => {
     const { deliveryId, ifStatus } = job!.data;
     const d = await getDelivery(pool, deliveryId);
     if (d.status === ifStatus) await markNoResponse(deliveryId);
-  });
+  }));
 
   await b.work(Q.slots, async () => {
     for (const t of await activeTenantIds(pool)) {

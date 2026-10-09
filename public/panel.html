@@ -256,6 +256,7 @@ a.btn{text-decoration:none;color:inherit;display:inline-flex;align-items:center}
 .repitem{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:13px}
 .repitem b{font-size:14px}
 .repitem .grow{flex:1 1 220px}
+.btn.danger{color:var(--red)}
 </style>
 </head>
 <body>
@@ -775,11 +776,11 @@ ui.filter = 'tutte'; ui.q = ''; ui.rowOpen = null; ui.bulkAsk = false;
 
 function rowActions(x){
   const open = `<button class="btn" data-open="${x.id}">Vista cliente</button>`;
-  if (['fuori_area','da_riprogrammare','senza_risposta'].includes(x.status)) return `<button class="btn primary" data-assign="${x.id}">Assegna data</button>${open}`;
-  if (isToClose(x)) return `<button class="btn primary" data-done="${x.id}">Consegnata</button><button class="btn" data-fail="${x.id}">Non consegnata</button>${open}`;
-  if (isConfirmed(x)) return `<button class="btn" data-assign="${x.id}">Cambia data</button>${open}`;
-  if (x.status === 'consegnata') return `<button class="btn" data-del="${x.id}">Elimina</button>${open}`;
-  return open;
+  const del = `<button class="btn ghost danger" data-del="${x.id}" title="Elimina la consegna di ${esc(x.name)}">Elimina</button>`;
+  if (['fuori_area','da_riprogrammare','senza_risposta'].includes(x.status)) return `<button class="btn primary" data-assign="${x.id}">Assegna data</button>${open}${del}`;
+  if (isToClose(x)) return `<button class="btn primary" data-done="${x.id}">Consegnata</button><button class="btn" data-fail="${x.id}">Non consegnata</button>${open}${del}`;
+  if (isConfirmed(x)) return `<button class="btn" data-assign="${x.id}">Cambia data</button>${open}${del}`;
+  return `${open}${del}`;
 }
 function rowPanel(x){
   const o = ui.rowOpen; if (!o || o.id !== x.id) return '';
@@ -787,7 +788,7 @@ function rowPanel(x){
     <button class="btn primary" data-failassign="${x.id}">Scelgo io la nuova data</button>
     <button class="btn" data-failcust="${x.id}">Faccio scegliere al cliente</button>
     <button class="btn ghost" data-close>Annulla</button></div>`;
-  if (o.kind === 'del') return `<div class="rowpanel warn"><span>Eliminare definitivamente la consegna di ${esc(x.name)}? Non si può annullare.</span>
+  if (o.kind === 'del') return `<div class="rowpanel warn"><span>Eliminare definitivamente ${esc(x.name)} (ordine ${esc(x.code)})? ${x.status === 'consegnata' ? '' : 'Il posto in calendario si libera, i messaggi non ancora partiti vengono annullati e il link del cliente smette di funzionare. Il cliente non riceve avvisi. '}Non si può annullare.</span>
     <button class="btn primary" data-delgo="${x.id}">Elimina</button><button class="btn ghost" data-close>Annulla</button></div>`;
   return '';
 }
