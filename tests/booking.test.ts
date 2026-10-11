@@ -291,6 +291,7 @@ test('report a orario fisso: solo con la funzione attiva, una volta al giorno', 
   if (localHHMM(now) < '00:05') return t.skip('a cavallo di mezzanotte');
   const at = localHHMM(new Date(now.getTime() - 60_000)); // un minuto fa
   await pool.query("DELETE FROM reports WHERE tenant_id = $1", [T2]);
+  await updateTenant(T2, { features: { reportAtTime: false } });
   await saveReportSetting(pool, T2, { hours: 0, email: false, to: '', at });
   assert.equal(await runDueReports(pool, [T2]), 0); // funzione non attiva per questo ambiente
   await updateTenant(T2, { features: { reportAtTime: true } });
@@ -319,4 +320,10 @@ test('report: restano 48 ore, si possono cancellare subito, e cancellarli non fa
   assert.equal(await getReportFile(pool, T, m.id), null);
   assert.ok((await purgeExpiredReports(pool)) >= 1);
   await saveReportSetting(pool, T, { hours: 0, email: false, to: '', at: '' });
+});
+
+test('i nuovi ambienti nascono con il report a orario fisso attivo', async () => {
+  const id = await createTenant({ name: 'Nuovo', slug: 'nuovo-test', username: 'nuovo', password: 'password-nuovo-1', email: 'n@example.it', subscription_end: addDays(todayLocal(), 30) });
+  const f = (await pool.query<{ features: Record<string, boolean> }>('SELECT features FROM tenants WHERE id = $1', [id])).rows[0]!.features;
+  assert.equal(f.reportAtTime, true);
 });

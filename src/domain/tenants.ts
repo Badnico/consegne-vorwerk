@@ -64,6 +64,9 @@ export async function listTenants(): Promise<TenantRow[]> {
   return r.rows;
 }
 
+/** Funzioni extra attive sui nuovi ambienti (si possono togliere da Modifica nel pannello amministratore). */
+export const DEFAULT_FEATURES = { reportAtTime: true };
+
 export interface NewTenant { name: string; slug: string; username: string; password: string; email: string; subscription_end: string }
 
 /** Crea ambiente, utente e fasce standard; genera subito gli slot. */
@@ -76,8 +79,8 @@ export async function createTenant(input: NewTenant): Promise<string> {
       throw new DomainError('slug_taken', `L'indirizzo /${input.slug} è già usato da un altro ambiente.`, 409);
     }
     const t = await c.query<{ id: string }>(
-      'INSERT INTO tenants (slug, name, email, subscription_end) VALUES ($1, $2, $3, $4) RETURNING id',
-      [input.slug, input.name, input.email, input.subscription_end],
+      'INSERT INTO tenants (slug, name, email, subscription_end, features) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+      [input.slug, input.name, input.email, input.subscription_end, JSON.stringify(DEFAULT_FEATURES)],
     );
     const id = t.rows[0]!.id;
     await c.query(
