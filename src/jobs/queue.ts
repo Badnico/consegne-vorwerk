@@ -106,10 +106,10 @@ async function registerWorkers(b: PgBoss) {
   });
   await b.schedule(Q.slots, '15 2 * * *', {}, { tz: config.TIMEZONE });
 
-  // Report Excel: ogni 10 minuti controlla quali ambienti hanno superato le ore impostate
+  // Report Excel: ogni minuto controlla quali ambienti hanno superato le ore impostate o l'orario fisso
   await b.work(Q.reports, async () => {
     const n = await runDueReports(pool, await activeTenantIds(pool));
     if (n) console.log(`[report] generati ${n} report`);
   });
-  await b.schedule(Q.reports, '*/10 * * * *', {}, { tz: config.TIMEZONE });
+  await b.schedule(Q.reports, '* * * * *', {}, { tz: config.TIMEZONE });
 }

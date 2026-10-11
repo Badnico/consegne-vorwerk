@@ -9,7 +9,7 @@ import { messageVars } from '../src/notify/notifier.js';
 import { fromAddress } from '../src/notify/email.js';
 import ExcelJS from 'exceljs';
 import { openSlots, parseWorkbook, planSlots } from '../src/domain/importer.js';
-import { createReport, getReportFile, listReports, runDueReports, situationOf } from '../src/domain/report.js';
+import { createReport, dueAtTime, getReportFile, listReports, localHHMM, runDueReports, situationOf } from '../src/domain/report.js';
 import { saveReportSetting } from '../src/domain/settings.js';
 import { createTenant, updateTenant } from '../src/domain/tenants.js';
 import { loginTenant } from '../src/lib/auth.js';
@@ -283,4 +283,21 @@ test('"Se clicca NO va richiamato": tutti quelli che dicono No passano all\'oper
   assert.equal(await declineDelivery(id, 'customer', T), 'out_of_area');
   await assert.rejects(bookSlot(id, a, 'customer')); // il cliente non sceglie da solo
   await saveArea(pool, T, { on: false, list: '', callAll: false });
+});
+
+test('report a orario fisso: solo con la funzione attiva, una volta al giorno', async (t) => {
+  const now = new Date();
+  if (localHHMM(now) < '00:05') return t.skip('a cavallo di mezzanotte');
+  const at = localHHMM(new Date(now.getTime() - 60_000)); // un minuto fa
+  await pool.query("DELETE FROM reports WHERE tenant_id = $1", [T2]);
+  await saveReportSetting(pool, T2, { hours: 0, email: false, to: '', at });
+  assert.equal(await runDueReports(pool, [T2]), 0); // funzione non attiva per questo ambiente
+  await updateTenant(T2, { features: { reportAtTime: true } });
+  assert.equal(await dueAtTime(pool, T2, at), true);
+  assert.equal(await runDueReports(pool, [T2]), 1);
+  assert.equal(await runDueReports(pool, [T2]), 0); // già fatto oggi
+  assert.equal((await listReports(pool, T2))[0]!.trigger, 'time');
+  const later = localHHMM(new Date(now.getTime() + 3600_000));
+  if (later > at) assert.equal(await dueAtTime(pool, T2, later), false); // orario non ancora arrivato
+  await updateTenant(T2, { features: { reportAtTime: false } });
 });

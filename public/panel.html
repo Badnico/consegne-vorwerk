@@ -257,6 +257,8 @@ a.btn{text-decoration:none;color:inherit;display:inline-flex;align-items:center}
 .repitem b{font-size:14px}
 .repitem .grow{flex:1 1 220px}
 .btn.danger{color:var(--red)}
+#repAtBox .inline{display:flex;gap:8px;align-items:center}
+#repAtBox input[type=time]{max-width:170px}
 </style>
 </head>
 <body>
@@ -353,6 +355,9 @@ a.btn{text-decoration:none;color:inherit;display:inline-flex;align-items:center}
           <div class="fields">
             <label class="f">Genera un report ogni (ore)<input id="repHours" type="number" min="0" max="720" step="1" inputmode="numeric"><small>0 = spento. Es. 24 = una volta al giorno.</small></label>
             <label class="f">Manda il report a<input id="repTo" type="email" placeholder="email dell'ambiente"><small id="repToHint"></small></label>
+          </div>
+          <div class="fields" id="repAtBox" hidden>
+            <label class="f">Ricevilo ogni giorno all'ora esatta<span class="inline"><input id="repAt" type="time" step="60"><button class="btn ghost" id="repAtClear" type="button">Togli</button></span><small>Es. 07:30. Vuoto = spento. Vale insieme al report ogni tot ore (puoi mettere 0 ore e usare solo l'orario).</small></label>
           </div>
           <div class="days"><label><input type="checkbox" id="repMail"> Invia anche per email, con il file allegato</label></div>
           <p class="note" id="repNote"></p>
@@ -1175,28 +1180,32 @@ async function loadReports(){
 function renderReports(full = true){
   if (!repData) return;
   const st = repData.setting;
-  if (full){ $('repHours').value = st.hours; $('repTo').value = st.to; $('repMail').checked = st.email; }
+  if (full){ $('repHours').value = st.hours; $('repTo').value = st.to; $('repMail').checked = st.email; $('repAt').value = st.at || ''; }
+  const atOn = !!(repData.features && repData.features.reportAtTime); $('repAtBox').hidden = !atOn;
+  const at = atOn ? $('repAt').value : '';
   $('repToHint').textContent = repData.tenantEmail ? `Se lo lasci vuoto: ${repData.tenantEmail}` : '';
   const h = +$('repHours').value || 0;
   const last = repData.reports.find(r => r.trigger === 'auto');
-  $('repNote').innerHTML = !h ? 'Report automatico spento. Puoi sempre crearne uno con "Genera adesso".'
-    : `Il report viene creato ogni <b>${h} ${h===1?'ora':'ore'}</b>${last ? `; l'ultimo automatico è del ${new Date(last.created_at).toLocaleString('it-IT',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}` : '; il primo arriva entro 10 minuti dal salvataggio'}.` +
-      ($('repMail').checked && !repData.emailReady ? ' <span class="capout out">L\'invio email non è ancora attivo sul server: il report resta scaricabile qui sotto.</span>' : '');
+  $('repNote').innerHTML = (at ? `Ogni giorno alle <b>${esc(at)}</b> ricevi il report. ` : '')
+    + (!h ? (at ? '' : 'Report automatico spento. Puoi sempre crearne uno con "Genera adesso".')
+      : `Il report viene creato ogni <b>${h} ${h===1?'ora':'ore'}</b>${last ? `; l'ultimo automatico è del ${new Date(last.created_at).toLocaleString('it-IT',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}` : '; il primo arriva entro pochi minuti dal salvataggio'}.`)
+    + ((h || at) && $('repMail').checked && !repData.emailReady ? ' <span class="capout out">L\'invio email non è ancora attivo sul server: il report resta scaricabile qui sotto.</span>' : '');
   $('repList').innerHTML = repData.reports.length ? '<div class="replist">' + repData.reports.map(r => {
     const c = r.counts || {};
-    return `<div class="repitem"><span class="grow"><b>${new Date(r.created_at).toLocaleString('it-IT',{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</b><br><small>${r.trigger==='auto'?'automatico':'generato a mano'}${r.emailed_to ? ' · inviato a '+esc(r.emailed_to) : ''}</small></span>
+    return `<div class="repitem"><span class="grow"><b>${new Date(r.created_at).toLocaleString('it-IT',{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</b><br><small>${r.trigger==='auto'?'automatico':r.trigger==='time'?'ogni giorno a orario fisso':'generato a mano'}${r.emailed_to ? ' · inviato a '+esc(r.emailed_to) : ''}</small></span>
       <span>${c['Da chiudere']||0} da chiudere · ${c['Da confermare']||0} da confermare · ${c['Confermata']||0} confermate</span>
       <a class="btn" href="/api/panel/reports/${r.id}" download>Scarica</a></div>`;
   }).join('') + '</div>' : '<p class="note">Nessun report ancora.</p>';
 }
-['repHours','repMail'].forEach(id => $(id).addEventListener('input', () => renderReports(false)));
+['repHours','repMail','repAt'].forEach(id => $(id).addEventListener('input', () => renderReports(false)));
+$('repAtClear').onclick = () => { $('repAt').value = ''; renderReports(false); };
 $('repSave').onclick = async () => {
   const err = $('repErr'); err.hidden = true;
   const hours = Math.round(+$('repHours').value);
   if (!Number.isFinite(hours) || hours < 0 || hours > 720){ err.textContent = 'Inserisci un numero di ore tra 0 e 720.'; err.hidden = false; return; }
   try {
-    repData.setting = await api('/reports/setting', {method:'PUT', body:{hours, email:$('repMail').checked, to:$('repTo').value.trim()}});
-    renderReports(); toast(hours ? `Report automatico ogni ${hours} ${hours===1?'ora':'ore'}` : 'Report automatico spento');
+    repData.setting = await api('/reports/setting', {method:'PUT', body:{hours, email:$('repMail').checked, to:$('repTo').value.trim(), at: $('repAtBox').hidden ? (repData.setting.at || '') : $('repAt').value}});
+    renderReports(); const atS = repData.setting.at && !$('repAtBox').hidden ? repData.setting.at : ''; toast([hours ? `ogni ${hours} ${hours===1?'ora':'ore'}` : '', atS ? `ogni giorno alle ${atS}` : ''].filter(Boolean).join(' e ').replace(/^./, c => 'Report automatico ' + c) || 'Report automatico spento');
   } catch (e){ err.textContent = e.message; err.hidden = false; }
 };
 $('repNow').onclick = async () => {

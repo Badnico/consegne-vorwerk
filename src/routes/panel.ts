@@ -14,7 +14,7 @@ import {
   getArea, getBooking, getMessages, parseArea, saveArea, saveBooking, saveMessages, validateMessages, MESSAGE_DEFAULTS, type Messages,
 } from '../domain/settings.js';
 import { createToken, customerUrl } from '../domain/tokens.js';
-import { getReportSetting, saveReportSetting } from '../domain/settings.js';
+import { getFeatures, getReportSetting, saveReportSetting } from '../domain/settings.js';
 import { openSlots, parseWorkbook, personKey, planSlots, templateWorkbook, type ImportRow, type PlannedRow } from '../domain/importer.js';
 import { createReport, getReportFile, listReports } from '../domain/report.js';
 import { enqueue } from '../jobs/queue.js';
@@ -290,7 +290,7 @@ export async function panelRoutes(app: FastifyInstance) {
   app.get('/reports', async (req) => {
     const t = tenantOf(req);
     const tenant = (await pool.query<{ email: string }>('SELECT email FROM tenants WHERE id = $1', [t])).rows[0];
-    return { setting: await getReportSetting(pool, t), tenantEmail: tenant?.email ?? '', emailReady: emailEnabled(), reports: await listReports(pool, t) };
+    return { setting: await getReportSetting(pool, t), features: await getFeatures(pool, t), tenantEmail: tenant?.email ?? '', emailReady: emailEnabled(), reports: await listReports(pool, t) };
   });
 
   app.put('/reports/setting', async (req) => {
@@ -298,9 +298,13 @@ export async function panelRoutes(app: FastifyInstance) {
       hours: z.number().int().min(0, 'Minimo 1 ora (0 per spegnere)').max(720, 'Massimo 720 ore (30 giorni)'),
       email: z.boolean(),
       to: z.string().trim().max(200).refine((v) => !v || z.string().email().safeParse(v).success, 'Email del destinatario non valida'),
+      at: z.string().regex(/^(([01]\d|2[0-3]):[0-5]\d)?$/, 'Orario non valido: usa il formato 08:30').optional().default(''),
     }).parse(req.body);
-    await saveReportSetting(pool, tenantOf(req), b);
-    return b;
+    const t = tenantOf(req);
+    // l'orario fisso vale solo se la funzione è attiva per questo ambiente; altrimenti resta quello salvato
+    const s = { ...b, at: (await getFeatures(pool, t)).reportAtTime ? b.at : (await getReportSetting(pool, t)).at };
+    await saveReportSetting(pool, t, s);
+    return s;
   });
 
   app.post('/reports', async (req) => createReport(pool, tenantOf(req), 'manual'));

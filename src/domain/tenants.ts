@@ -16,6 +16,7 @@ export interface Tenant {
 }
 
 export interface TenantRow extends Tenant {
+  features: Record<string, boolean>;
   username: string | null;
   deliveries: number;
   active_deliveries: number;
@@ -54,7 +55,7 @@ export async function getTenantBySlug(db: Db, slug: string): Promise<Tenant | nu
 
 export async function listTenants(): Promise<TenantRow[]> {
   const r = await pool.query<TenantRow>(`
-    SELECT t.id, t.slug, t.name, t.email, t.subscription_end, t.suspended, t.created_at,
+    SELECT t.id, t.slug, t.name, t.email, t.subscription_end, t.suspended, t.created_at, t.features,
            (SELECT o.username FROM operators o WHERE o.tenant_id = t.id ORDER BY o.created_at LIMIT 1) AS username,
            (SELECT count(*)::int FROM deliveries d WHERE d.tenant_id = t.id) AS deliveries,
            (SELECT count(*)::int FROM deliveries d WHERE d.tenant_id = t.id AND d.status NOT IN ('delivered','cancelled')) AS active_deliveries,
@@ -89,7 +90,7 @@ export async function createTenant(input: NewTenant): Promise<string> {
   });
 }
 
-export interface TenantPatch { name?: string; email?: string; subscription_end?: string; suspended?: boolean; username?: string; password?: string }
+export interface TenantPatch { name?: string; email?: string; subscription_end?: string; suspended?: boolean; username?: string; password?: string; features?: Record<string, boolean | undefined> }
 
 export async function updateTenant(id: string, p: TenantPatch) {
   if (p.password !== undefined) checkPassword(p.password);
@@ -102,6 +103,7 @@ export async function updateTenant(id: string, p: TenantPatch) {
               subscription_end = COALESCE($4, subscription_end), suspended = COALESCE($5, suspended) WHERE id = $1`,
       [id, p.name ?? null, p.email ?? null, p.subscription_end ?? null, p.suspended ?? null],
     );
+    if (p.features) await c.query('UPDATE tenants SET features = features || $2::jsonb WHERE id = $1', [id, JSON.stringify(p.features)]);
     const op = await c.query<{ id: string }>('SELECT id FROM operators WHERE tenant_id = $1 ORDER BY created_at LIMIT 1', [id]);
     const opId = op.rows[0]?.id;
     if (!opId && (p.username || hash)) {

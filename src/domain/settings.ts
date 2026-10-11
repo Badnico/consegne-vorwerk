@@ -107,8 +107,19 @@ export const saveBooking = (db: Db, t: string, b: BookingSetting) => put(db, t, 
 
 /* ---------- report Excel periodico ---------- */
 
-/** hours: ogni quante ore generare il report (0 = spento). email: mandarlo anche per email. to: destinatario (vuoto = email dell'ambiente). */
-export interface ReportSetting { hours: number; email: boolean; to: string }
-export const REPORT_DEFAULT: ReportSetting = { hours: 0, email: true, to: '' };
+/**
+ * hours: ogni quante ore generare il report (0 = spento). email: mandarlo anche per email. to: destinatario (vuoto = email dell'ambiente).
+ * at: "HH:MM" = ogni giorno a quell'ora (vuoto = spento). Solo per gli ambienti con la funzione extra "reportAtTime".
+ */
+export interface ReportSetting { hours: number; email: boolean; to: string; at: string }
+export const REPORT_DEFAULT: ReportSetting = { hours: 0, email: true, to: '', at: '' };
+
+/* ---------- funzioni extra per ambiente (si attivano dal pannello amministratore) ---------- */
+
+export interface Features { reportAtTime?: boolean }
+export const FEATURE_LABELS: Record<keyof Features, string> = { reportAtTime: 'Report Excel a orario fisso' };
+export async function getFeatures(db: Db, tenantId: string): Promise<Features> {
+  return (await db.query<{ features: Features }>('SELECT features FROM tenants WHERE id = $1', [tenantId])).rows[0]?.features ?? {};
+}
 export const getReportSetting = (db: Db, t: string) => get<ReportSetting>(db, t, 'report', { ...REPORT_DEFAULT });
 export const saveReportSetting = (db: Db, t: string, r: ReportSetting) => put(db, t, 'report', r);

@@ -3,7 +3,7 @@ import type { Db } from '../lib/db.js';
 import { config, emailEnabled } from '../config.js';
 import { formatDateIt, hhmm, todayLocal } from '../lib/dates.js';
 import { listDeliveries, type DeliveryView, type Status } from './deliveries.js';
-import { getReportSetting } from './settings.js';
+import { getFeatures, getReportSetting } from './settings.js';
 import { esc, layout, para, sendEmail } from '../notify/email.js';
 
 /**
@@ -115,12 +115,12 @@ export async function buildReport(db: Db, tenantId: string, tenantName: string) 
 }
 
 /** Genera, salva e (se impostato) manda per email il report di un ambiente. */
-export async function createReport(db: Db, tenantId: string, trigger: 'auto' | 'manual') {
+export async function createReport(db: Db, tenantId: string, trigger: 'auto' | 'time' | 'manual') {
   const t = (await db.query<{ name: string; email: string }>('SELECT name, email FROM tenants WHERE id = $1', [tenantId])).rows[0];
   if (!t) throw new Error('Ambiente non trovato');
   const setting = await getReportSetting(db, tenantId);
   const rep = await buildReport(db, tenantId, t.name);
-  const to = trigger === 'auto' && setting.email && emailEnabled() ? (setting.to || t.email) : null;
+  const to = trigger !== 'manual' && setting.email && emailEnabled() ? (setting.to || t.email) : null;
   const ins = await db.query<{ id: string; created_at: string }>(
     'INSERT INTO reports (tenant_id, filename, rows, counts, trigger, emailed_to, data) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, created_at',
     [tenantId, rep.filename, rep.rows, JSON.stringify(rep.counts), trigger, to, rep.buffer],
@@ -161,6 +161,10 @@ export async function runDueReports(db: Db, tenantIds: string[]) {
   let made = 0;
   for (const t of tenantIds) {
     const s = await getReportSetting(db, t);
+    if (s.at && (await getFeatures(db, t)).reportAtTime && await dueAtTime(db, t, s.at)) {
+      try { await createReport(db, t, 'time'); made++; }
+      catch (err) { console.error(`[report] ambiente ${t}`, err); }
+    }
     if (!s.hours) continue;
     const last = (await db.query<{ created_at: Date }>("SELECT created_at FROM reports WHERE tenant_id = $1 AND trigger = 'auto' ORDER BY created_at DESC LIMIT 1", [t])).rows[0];
     // 5 minuti di tolleranza: il controllo gira ogni 10 minuti
@@ -169,4 +173,24 @@ export async function runDueReports(db: Db, tenantIds: string[]) {
     catch (err) { console.error(`[report] ambiente ${t}`, err); }
   }
   return made;
+}
+
+/** Ora locale "HH:MM" (fuso dell'applicazione). */
+export function localHHMM(d = new Date(), tz = config.TIMEZONE) {
+  return d.toLocaleTimeString('it-IT', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
+/**
+ * Report "ogni giorno alle HH:MM": dovuto se l'ora è passata da meno di 2 ore (recupera eventuali riavvii)
+ * e oggi non è ancora stato fatto.
+ */
+export async function dueAtTime(db: Db, tenantId: string, at: string, now = new Date()) {
+  const toMin = (s: string) => +s.slice(0, 2) * 60 + +s.slice(3, 5);
+  const late = toMin(localHHMM(now)) - toMin(at);
+  if (late < 0 || late >= 120) return false;
+  const done = await db.query(
+    "SELECT 1 FROM reports WHERE tenant_id = $1 AND trigger = 'time' AND (created_at AT TIME ZONE $2)::date = $3::date",
+    [tenantId, config.TIMEZONE, todayLocal(config.TIMEZONE)],
+  );
+  return !done.rowCount;
 }

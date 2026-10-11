@@ -43,6 +43,7 @@ export async function superadminRoutes(app: FastifyInstance) {
       suspended: z.boolean().optional(),
       username: z.string().trim().min(3, "L'utente deve avere almeno 3 caratteri").max(60).optional(),
       password: z.string().min(10, 'La password deve avere almeno 10 caratteri').max(200).optional(),
+      features: z.object({ reportAtTime: z.boolean().optional() }).strict().optional(),
     }).parse(req.body);
     await updateTenant(id, b);
     return { ok: true };
