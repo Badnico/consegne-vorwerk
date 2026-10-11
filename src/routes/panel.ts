@@ -16,7 +16,7 @@ import {
 import { createToken, customerUrl } from '../domain/tokens.js';
 import { getFeatures, getReportSetting, saveReportSetting } from '../domain/settings.js';
 import { openSlots, parseWorkbook, personKey, planSlots, templateWorkbook, type ImportRow, type PlannedRow } from '../domain/importer.js';
-import { createReport, getReportFile, listReports } from '../domain/report.js';
+import { createReport, deleteReport, getReportFile, listReports } from '../domain/report.js';
 import { enqueue } from '../jobs/queue.js';
 
 /**
@@ -309,10 +309,16 @@ export async function panelRoutes(app: FastifyInstance) {
 
   app.post('/reports', async (req) => createReport(pool, tenantOf(req), 'manual'));
 
+  app.delete('/reports/:id', async (req, reply) => {
+    const { id } = idParam.parse(req.params);
+    if (!(await deleteReport(pool, tenantOf(req), id))) throw new DomainError('not_found', 'Report non trovato.', 404);
+    return reply.code(204).send();
+  });
+
   app.get('/reports/:id', async (req, reply) => {
     const { id } = idParam.parse(req.params);
     const f = await getReportFile(pool, tenantOf(req), id);
-    if (!f) throw new DomainError('not_found', 'Report non trovato.', 404);
+    if (!f) throw new DomainError('not_found', 'Report non trovato: è stato cancellato o sono passate più di 48 ore.', 404);
     return reply.header('content-type', XLSX).header('content-disposition', attachment(f.filename)).send(f.data);
   });
 

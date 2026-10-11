@@ -123,3 +123,8 @@ export async function getFeatures(db: Db, tenantId: string): Promise<Features> {
 }
 export const getReportSetting = (db: Db, t: string) => get<ReportSetting>(db, t, 'report', { ...REPORT_DEFAULT });
 export const saveReportSetting = (db: Db, t: string, r: ReportSetting) => put(db, t, 'report', r);
+
+/** Quando sono stati fatti gli ultimi report automatici: resta anche dopo che i file sono stati cancellati. */
+export interface ReportState { lastAuto?: string; lastTimeDay?: string }
+export const getReportState = (db: Db, t: string) => get<ReportState>(db, t, 'report_state', {});
+export const saveReportState = async (db: Db, t: string, patch: ReportState) => put(db, t, 'report_state', { ...(await getReportState(db, t)), ...patch });

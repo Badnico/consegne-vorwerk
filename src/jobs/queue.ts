@@ -4,7 +4,7 @@ import { DomainError } from '../lib/errors.js';
 import { pool } from '../lib/db.js';
 import { getDelivery, incrementReminders, markNoResponse, type Status } from '../domain/deliveries.js';
 import { activeTenantIds, generateSlots } from '../domain/slots.js';
-import { runDueReports } from '../domain/report.js';
+import { purgeExpiredReports, runDueReports } from '../domain/report.js';
 import { sendConfirmation, sendOutOfArea, sendProposal, sendRescheduleLink } from '../notify/notifier.js';
 
 /**
@@ -108,6 +108,8 @@ async function registerWorkers(b: PgBoss) {
 
   // Report Excel: ogni minuto controlla quali ambienti hanno superato le ore impostate o l'orario fisso
   await b.work(Q.reports, async () => {
+    const gone = await purgeExpiredReports(pool);
+    if (gone) console.log(`[report] cancellati ${gone} report più vecchi di 48 ore`);
     const n = await runDueReports(pool, await activeTenantIds(pool));
     if (n) console.log(`[report] generati ${n} report`);
   });

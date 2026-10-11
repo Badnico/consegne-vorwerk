@@ -3,7 +3,7 @@ import type { Db } from '../lib/db.js';
 import { config, emailEnabled } from '../config.js';
 import { formatDateIt, hhmm, todayLocal } from '../lib/dates.js';
 import { listDeliveries, type DeliveryView, type Status } from './deliveries.js';
-import { getFeatures, getReportSetting } from './settings.js';
+import { getFeatures, getReportSetting, getReportState, saveReportState } from './settings.js';
 import { esc, layout, para, sendEmail } from '../notify/email.js';
 
 /**
@@ -12,7 +12,8 @@ import { esc, layout, para, sendEmail } from '../notify/email.js';
  */
 
 export type Situation = 'Da confermare' | 'Confermata' | 'Da chiudere';
-const KEEP = 60; // report conservati per ambiente
+const KEEP = 60; // report conservati per ambiente (al massimo)
+export const RETENTION_HOURS = 48; // dopo 48 ore i report si cancellano da soli
 
 const STATUS_IT: Record<Status, string> = {
   proposed: 'Messaggio inviato, in attesa di risposta',
@@ -129,6 +130,8 @@ export async function createReport(db: Db, tenantId: string, trigger: 'auto' | '
     'DELETE FROM reports WHERE tenant_id = $1 AND id NOT IN (SELECT id FROM reports WHERE tenant_id = $1 ORDER BY created_at DESC LIMIT $2)',
     [tenantId, KEEP],
   );
+  if (trigger === 'auto') await saveReportState(db, tenantId, { lastAuto: new Date().toISOString() });
+  if (trigger === 'time') await saveReportState(db, tenantId, { lastTimeDay: todayLocal(config.TIMEZONE) });
   if (to) {
     const c = rep.counts;
     const lines = `Da chiudere: ${c['Da chiudere']}\nDa confermare: ${c['Da confermare']}\nConfermate: ${c.Confermata}`;
@@ -147,13 +150,26 @@ export async function createReport(db: Db, tenantId: string, trigger: 'auto' | '
 
 export async function listReports(db: Db, tenantId: string) {
   return (await db.query<{ id: string; created_at: string; filename: string; rows: number; counts: Record<Situation, number>; trigger: string; emailed_to: string | null }>(
-    'SELECT id, created_at, filename, rows, counts, trigger, emailed_to FROM reports WHERE tenant_id = $1 ORDER BY created_at DESC LIMIT 20',
+    `SELECT id, created_at, created_at + interval '${RETENTION_HOURS} hours' AS expires_at, filename, rows, counts, trigger, emailed_to
+       FROM reports WHERE tenant_id = $1 AND created_at > now() - interval '${RETENTION_HOURS} hours' ORDER BY created_at DESC LIMIT 60`,
     [tenantId],
   )).rows;
 }
 
 export async function getReportFile(db: Db, tenantId: string, id: string) {
-  return (await db.query<{ filename: string; data: Buffer }>('SELECT filename, data FROM reports WHERE tenant_id = $1 AND id = $2', [tenantId, id])).rows[0] ?? null;
+  return (await db.query<{ filename: string; data: Buffer }>(
+    `SELECT filename, data FROM reports WHERE tenant_id = $1 AND id = $2 AND created_at > now() - interval '${RETENTION_HOURS} hours'`, [tenantId, id],
+  )).rows[0] ?? null;
+}
+
+/** Cancella subito un report (pulsante nel pannello). */
+export async function deleteReport(db: Db, tenantId: string, id: string) {
+  return ((await db.query('DELETE FROM reports WHERE tenant_id = $1 AND id = $2', [tenantId, id])).rowCount ?? 0) > 0;
+}
+
+/** Cancella i report più vecchi di 48 ore (tutti gli ambienti). */
+export async function purgeExpiredReports(db: Db) {
+  return (await db.query(`DELETE FROM reports WHERE created_at < now() - interval '${RETENTION_HOURS} hours'`)).rowCount ?? 0;
 }
 
 /** Chiamata periodicamente dalla coda: genera i report degli ambienti per cui sono passate le ore impostate. */
@@ -166,9 +182,11 @@ export async function runDueReports(db: Db, tenantIds: string[]) {
       catch (err) { console.error(`[report] ambiente ${t}`, err); }
     }
     if (!s.hours) continue;
-    const last = (await db.query<{ created_at: Date }>("SELECT created_at FROM reports WHERE tenant_id = $1 AND trigger = 'auto' ORDER BY created_at DESC LIMIT 1", [t])).rows[0];
-    // 5 minuti di tolleranza: il controllo gira ogni 10 minuti
-    if (last && Date.now() - new Date(last.created_at).getTime() < s.hours * 3600_000 - 5 * 60_000) continue;
+    // l'ultimo invio si ricorda anche se il file è già stato cancellato (a mano o dopo 48 ore)
+    const lastAuto = (await getReportState(db, t)).lastAuto
+      ?? (await db.query<{ created_at: Date }>("SELECT created_at FROM reports WHERE tenant_id = $1 AND trigger = 'auto' ORDER BY created_at DESC LIMIT 1", [t])).rows[0]?.created_at;
+    // qualche minuto di tolleranza sul controllo periodico
+    if (lastAuto && Date.now() - new Date(lastAuto).getTime() < s.hours * 3600_000 - 5 * 60_000) continue;
     try { await createReport(db, t, 'auto'); made++; }
     catch (err) { console.error(`[report] ambiente ${t}`, err); }
   }
@@ -188,6 +206,7 @@ export async function dueAtTime(db: Db, tenantId: string, at: string, now = new 
   const toMin = (s: string) => +s.slice(0, 2) * 60 + +s.slice(3, 5);
   const late = toMin(localHHMM(now)) - toMin(at);
   if (late < 0 || late >= 120) return false;
+  if ((await getReportState(db, tenantId)).lastTimeDay === todayLocal(config.TIMEZONE)) return false; // già fatto oggi (anche se poi cancellato)
   const done = await db.query(
     "SELECT 1 FROM reports WHERE tenant_id = $1 AND trigger = 'time' AND (created_at AT TIME ZONE $2)::date = $3::date",
     [tenantId, config.TIMEZONE, todayLocal(config.TIMEZONE)],

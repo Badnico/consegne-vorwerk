@@ -9,8 +9,8 @@ import { messageVars } from '../src/notify/notifier.js';
 import { fromAddress } from '../src/notify/email.js';
 import ExcelJS from 'exceljs';
 import { openSlots, parseWorkbook, planSlots } from '../src/domain/importer.js';
-import { createReport, dueAtTime, getReportFile, listReports, localHHMM, runDueReports, situationOf } from '../src/domain/report.js';
-import { saveReportSetting } from '../src/domain/settings.js';
+import { createReport, deleteReport, purgeExpiredReports, dueAtTime, getReportFile, listReports, localHHMM, runDueReports, situationOf } from '../src/domain/report.js';
+import { saveReportSetting, saveReportState } from '../src/domain/settings.js';
 import { createTenant, updateTenant } from '../src/domain/tenants.js';
 import { loginTenant } from '../src/lib/auth.js';
 import { addDays, todayLocal } from '../src/lib/dates.js';
@@ -258,6 +258,7 @@ test('report automatico: parte quando sono passate le ore impostate, non prima',
   assert.equal(await runDueReports(pool, [T]), 1); // primo report
   assert.equal(await runDueReports(pool, [T]), 0); // troppo presto
   await pool.query("UPDATE reports SET created_at = now() - interval '2 hours' WHERE tenant_id = $1", [T]);
+  await saveReportState(pool, T, { lastAuto: new Date(Date.now() - 2 * 3600_000).toISOString() });
   assert.equal(await runDueReports(pool, [T]), 1);
 });
 
@@ -300,4 +301,22 @@ test('report a orario fisso: solo con la funzione attiva, una volta al giorno', 
   const later = localHHMM(new Date(now.getTime() + 3600_000));
   if (later > at) assert.equal(await dueAtTime(pool, T2, later), false); // orario non ancora arrivato
   await updateTenant(T2, { features: { reportAtTime: false } });
+});
+
+test('report: restano 48 ore, si possono cancellare subito, e cancellarli non fa ripartire l\'invio', async () => {
+  await pool.query('DELETE FROM reports WHERE tenant_id = $1', [T]);
+  await saveReportSetting(pool, T, { hours: 2, email: false, to: '', at: '' });
+  await saveReportState(pool, T, { lastAuto: undefined });
+  assert.equal(await runDueReports(pool, [T]), 1);
+  const [r] = await listReports(pool, T);
+  assert.ok(r);
+  assert.equal(await deleteReport(pool, T2, r!.id), false); // non si cancellano report di altri ambienti
+  assert.equal(await deleteReport(pool, T, r!.id), true);
+  assert.equal(await runDueReports(pool, [T]), 0); // cancellato a mano: il prossimo arriva comunque fra 2 ore
+  const m = await createReport(pool, T, 'manual');
+  await pool.query("UPDATE reports SET created_at = now() - interval '49 hours' WHERE id = $1", [m.id]);
+  assert.equal((await listReports(pool, T)).length, 0); // scaduto: non più visibile
+  assert.equal(await getReportFile(pool, T, m.id), null);
+  assert.ok((await purgeExpiredReports(pool)) >= 1);
+  await saveReportSetting(pool, T, { hours: 0, email: false, to: '', at: '' });
 });

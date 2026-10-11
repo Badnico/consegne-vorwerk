@@ -63,7 +63,7 @@ In **Nuova consegna** premi **Scegli il file Excel** e seleziona il file (.xlsx)
 
 ### Report Excel
 
-Nella scheda **Report Excel** scrivi ogni quante ore generare il report (es. 24 = una volta al giorno; 0 = spento) e premi **Salva**. Il file contiene tutte le consegne aperte con i dati del cliente e la situazione: da confermare, confermata o da chiudere. I report restano scaricabili nella stessa pagina; se l'email è collegata arrivano anche per email con il file allegato. **Genera adesso** ne crea uno subito.
+Nella scheda **Report Excel** scrivi ogni quante ore generare il report (es. 24 = una volta al giorno; 0 = spento) e premi **Salva**. Il file contiene tutte le consegne aperte con i dati del cliente e la situazione: da confermare, confermata o da chiudere. I report restano scaricabili nella stessa pagina per 48 ore, poi si cancellano da soli (con **Elimina** li cancelli subito); se l'email è collegata arrivano anche per email con il file allegato. **Genera adesso** ne crea uno subito.
 
 **Funzione extra "Report Excel a orario fisso".** Si attiva per singolo cliente dal pannello amministratore: **Modifica** → **Funzioni extra**. Quando è attiva, nella scheda Report Excel del cliente compare **Ricevilo ogni giorno all'ora esatta**: il report arriva ogni giorno a quell'ora (entro un paio di minuti).
 

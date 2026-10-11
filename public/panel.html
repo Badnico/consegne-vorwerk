@@ -256,6 +256,7 @@ a.btn{text-decoration:none;color:inherit;display:inline-flex;align-items:center}
 .repitem{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:13px}
 .repitem b{font-size:14px}
 .repitem .grow{flex:1 1 220px}
+.repitem .repexp{color:var(--muted);font-size:12px}
 .btn.danger{color:var(--red)}
 #repAtBox .inline{display:flex;gap:8px;align-items:center}
 #repAtBox input[type=time]{max-width:170px}
@@ -366,6 +367,7 @@ a.btn{text-decoration:none;color:inherit;display:inline-flex;align-items:center}
         </fieldset>
         <fieldset>
           <legend>Report generati</legend>
+          <p class="note">Ogni report resta qui, visibile e scaricabile, per 48 ore; poi si cancella da solo. Con <b>Elimina</b> lo cancelli subito.</p>
           <div id="repList"><p class="note">Caricamento…</p></div>
         </fieldset>
       </div>
@@ -1194,10 +1196,20 @@ function renderReports(full = true){
     const c = r.counts || {};
     return `<div class="repitem"><span class="grow"><b>${new Date(r.created_at).toLocaleString('it-IT',{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</b><br><small>${r.trigger==='auto'?'automatico':r.trigger==='time'?'ogni giorno a orario fisso':'generato a mano'}${r.emailed_to ? ' · inviato a '+esc(r.emailed_to) : ''}</small></span>
       <span>${c['Da chiudere']||0} da chiudere · ${c['Da confermare']||0} da confermare · ${c['Confermata']||0} confermate</span>
-      <a class="btn" href="/api/panel/reports/${r.id}" download>Scarica</a></div>`;
+      <span class="repexp">si cancella ${new Date(r.expires_at).toLocaleString('it-IT',{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</span>
+      <a class="btn" href="/api/panel/reports/${r.id}" download>Scarica</a>
+      <button class="btn ghost danger" type="button" data-repdel="${r.id}">${ui.repDel === r.id ? 'Conferma: elimina' : 'Elimina'}</button></div>`;
   }).join('') + '</div>' : '<p class="note">Nessun report ancora.</p>';
 }
 ['repHours','repMail','repAt'].forEach(id => $(id).addEventListener('input', () => renderReports(false)));
+$('repList').addEventListener('click', async e => {
+  const b = e.target.closest('[data-repdel]'); if (!b) return;
+  const id = b.dataset.repdel;
+  if (ui.repDel !== id){ ui.repDel = id; renderReports(false); clearTimeout(ui.repDelT); ui.repDelT = setTimeout(() => { ui.repDel = null; renderReports(false); }, 4000); return; } // secondo clic per confermare
+  ui.repDel = null; b.disabled = true;
+  try { await api(`/reports/${id}`, {method:'DELETE'}); repData.reports = repData.reports.filter(x => x.id !== id); renderReports(false); toast('Report eliminato'); }
+  catch (err){ toast(err.message); loadReports(); }
+});
 $('repAtClear').onclick = () => { $('repAt').value = ''; renderReports(false); };
 $('repSave').onclick = async () => {
   const err = $('repErr'); err.hidden = true;
