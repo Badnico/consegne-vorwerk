@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { config } from '../config.js';
 import { pool } from '../lib/db.js';
 import { DomainError } from '../lib/errors.js';
-import { confirmDelivery, declineDelivery } from '../domain/deliveries.js';
+import { answerPin, confirmDelivery, declineDelivery } from '../domain/deliveries.js';
 import { verifySignature, type WaWebhook } from '../notify/whatsapp.js';
 import { enqueue } from '../jobs/queue.js';
 
@@ -17,13 +17,19 @@ async function recordInbound(deliveryId: string | null, providerId: string, payl
 }
 
 async function handleReply(payload: string) {
-  const m = /^(YES|NO):([0-9a-f-]{36})$/i.exec(payload);
+  const m = /^(YES|NO|PINYES|PINNO):([0-9a-f-]{36})$/i.exec(payload);
   if (!m) return null;
   const [, answer, deliveryId] = m as unknown as [string, string, string];
   try {
-    if (answer.toUpperCase() === 'YES') {
-      await confirmDelivery(deliveryId, 'customer:whatsapp');
-      await enqueue.afterConfirm(deliveryId);
+    const a = answer.toUpperCase();
+    if (a === 'YES') {
+      const st = await confirmDelivery(deliveryId, 'customer:whatsapp');
+      if (st === 'pin_check') await enqueue.askPin(deliveryId); // prima la domanda sul PIN
+      else await enqueue.afterConfirm(deliveryId);
+    } else if (a === 'PINYES' || a === 'PINNO') {
+      const st = await answerPin(deliveryId, a === 'PINYES', 'customer:whatsapp');
+      if (st === 'confirmed') await enqueue.afterConfirm(deliveryId);
+      else await enqueue.afterDecline(deliveryId); // messaggio "fuori area": lo richiama un operatore
     } else {
       await declineDelivery(deliveryId, 'customer:whatsapp');
       await enqueue.afterDecline(deliveryId);

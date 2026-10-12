@@ -55,6 +55,11 @@ function render() {
     if (pre === 'si') $('#yes').focus(); if (pre === 'no') $('#no').focus();
     return;
   }
+  if (state.status === 'pin_check') {
+    app.innerHTML = head + '<div class="card"><span class="muted">Consegna</span><span class="when">' + esc(when(state.slot || state.proposed)) + '</span><p><strong>' + txt(T.pin_question) + '</strong></p><div class="row"><button class="primary" id="pinyes">' + esc(T.pin_yes) + '</button><button id="pinno">' + esc(T.pin_no) + '</button></div></div>';
+    $('#pinyes').onclick = () => act('/pin', { received: true }); $('#pinno').onclick = () => act('/pin', { received: false });
+    return;
+  }
   if (state.status === 'confirmed') {
     app.innerHTML = head + '<div class="card"><p>' + txt(T.confirmed) + '</p><div class="row"><button id="chg">Cambia data</button></div></div>';
     $('#chg').onclick = () => act('/decline'); return;

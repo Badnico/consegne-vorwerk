@@ -61,6 +61,22 @@ In **Nuova consegna** premi **Scegli il file Excel** e seleziona il file (.xlsx)
 - **Invia messaggio ai clienti** crea tutte le consegne e manda il messaggio a tutti insieme.
 - Se ricarichi lo stesso file, le consegne già inserite vengono riconosciute e non partono due volte.
 
+### File del gestionale (es. SETTEMBRE.xlsx)
+
+Si può caricare direttamente il file esportato dal gestionale, anche con più fogli (uno per zona). Colonne usate:
+- **DESTINATARIO MERCE**, **Arri Via**, **Arri Località**, **Arri Pr**: cliente e indirizzo.
+- **Dest - Numero Telefono1** (o Telefono2 se il primo manca): WhatsApp.
+- **Brand**: diventa il {prodotto} nei messaggi.
+- **Clie. Rif. Ordine**: numero d'ordine (gli ordini ripetuti in più fogli vengono inviati una volta sola).
+- **Importo Contrassegno** maggiore di 0: nella conferma il cliente legge "Ricorda che c'è il contrassegno da pagare di …".
+- **Priorita Evasione** 90 o 98: nella conferma il cliente legge "Ricorda di preparare al corriere il prodotto da ritirare".
+
+Il report Excel ha le stesse colonne del file, con **Situazione** come prima colonna.
+
+### Domanda sul PIN
+
+Dopo il Sì il cliente riceve "Hai ricevuto il PIN?" con i pulsanti Sì e No. Sì: riceve la conferma con l'indirizzo di consegna (e, se serve, contrassegno e ritiro). No: riceve il messaggio "fuori area" e la consegna passa a te da richiamare. Si spegne in **Messaggi** con la casella in alto.
+
 ### Report Excel
 
 Nella scheda **Report Excel** scrivi ogni quante ore generare il report (es. 24 = una volta al giorno; 0 = spento) e premi **Salva**. Il file contiene tutte le consegne aperte con i dati del cliente e la situazione: da confermare, confermata o da chiudere. I report restano scaricabili nella stessa pagina per 48 ore, poi si cancellano da soli (con **Elimina** li cancelli subito); se l'email è collegata arrivano anche per email con il file allegato. **Genera adesso** ne crea uno subito.

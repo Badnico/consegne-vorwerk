@@ -23,10 +23,16 @@ export const MESSAGE_DEFAULTS = {
   page_title: 'Quando vuoi ricevere il pacco?',
   page_note: 'Ordine {ordine} · {indirizzo}. Vedi solo le fasce con posti liberi, aggiornate in tempo reale.',
   page_button: 'Conferma {data}, {fascia}',
+  wa_pin_question: 'Hai ricevuto il PIN?',
+  wa_pin_yes: 'Sì',
+  wa_pin_no: 'No',
+  extra_address: 'Indirizzo di consegna: {indirizzo}',
+  extra_cod: "Ricorda che c'è il contrassegno da pagare di {contrassegno}.",
+  extra_pickup: 'Ricorda di preparare al corriere il prodotto da ritirare.',
 };
 export type MessageKey = keyof typeof MESSAGE_DEFAULTS;
 export type Messages = Record<MessageKey, string>;
-export const MESSAGE_VARS = ['azienda', 'nome', 'prodotto', 'ordine', 'data', 'inizio', 'fine', 'fascia', 'indirizzo', 'link'] as const;
+export const MESSAGE_VARS = ['azienda', 'contrassegno', 'nome', 'prodotto', 'ordine', 'data', 'inizio', 'fine', 'fascia', 'indirizzo', 'link'] as const;
 
 /** Sostituisce i campi {nome}, {data}, ... Lascia intatti quelli sconosciuti. */
 export function fillText(template: string, vars: Partial<Record<(typeof MESSAGE_VARS)[number], string>>): string {
@@ -40,7 +46,7 @@ export function validateMessages(m: Record<string, unknown>): string | null {
     if (typeof v !== 'string' || !v.trim()) return `Il testo "${k}" non può essere vuoto.`;
     const unknown = [...v.matchAll(/\{([^}]*)\}/g)].map((x) => x[1]).filter((x) => !(MESSAGE_VARS as readonly string[]).includes(x ?? ''));
     if (unknown.length) return `Campo non riconosciuto in "${k}": {${unknown[0]}}.`;
-    if ((k === 'wa_yes' || k === 'wa_no') && v.length > 20) return 'I pulsanti WhatsApp hanno al massimo 20 caratteri.';
+    if (['wa_yes', 'wa_no', 'wa_pin_yes', 'wa_pin_no'].includes(k) && v.length > 20) return 'I pulsanti WhatsApp hanno al massimo 20 caratteri.';
   }
   if (!String(m.wa_declined).includes('{link}')) return 'La risposta dopo il rifiuto deve contenere {link}.';
   return null;
@@ -49,8 +55,9 @@ export function validateMessages(m: Record<string, unknown>): string | null {
 /* ---------- area servita ---------- */
 
 /** callAll: "Se clicca NO va richiamato": chi risponde No riceve sempre il messaggio "fuori area" e lo richiama un operatore. */
-export interface AreaSetting { on: boolean; list: string; callAll?: boolean }
-export const AREA_DEFAULT: AreaSetting = { on: false, list: '', callAll: false };
+/** noSend: CAP, località o sigle di provincia a cui NON mandare il primo messaggio (la consegna passa subito all'operatore). */
+export interface AreaSetting { on: boolean; list: string; callAll?: boolean; noSend?: string }
+export const AREA_DEFAULT: AreaSetting = { on: false, list: '', callAll: false, noSend: '' };
 
 export function parseArea(text: string) {
   const rules: { a: string; b: string }[] = [], bad: string[] = [];
@@ -77,6 +84,25 @@ export function inArea(area: AreaSetting, cap: string | null | undefined): boole
 /** Può scegliere da solo la nuova data? No se l'operatore deve richiamare tutti o se il CAP è fuori area. */
 export function canSelfBook(area: AreaSetting, cap: string | null | undefined): boolean {
   return !area.callAll && inArea(area, cap);
+}
+
+const normPlace = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+
+/**
+ * Esclusione dal primo messaggio: righe/virgole con CAP (20121, 20121-20162, 201*), nomi di località (ANDRANO)
+ * o sigle di provincia (LE). Restituisce la voce che corrisponde, oppure null.
+ */
+export function noSendMatch(list: string | undefined, d: { cap?: string | null; city?: string | null; province?: string | null }): string | null {
+  if (!list?.trim()) return null;
+  const city = normPlace(d.city ?? ''), prov = normPlace(d.province ?? '');
+  for (const raw of list.split(/[\n,;]+/)) {
+    const t = raw.trim(); if (!t) continue;
+    const { rules } = parseArea(t);
+    if (rules.length) { if (/^\d{5}$/.test(d.cap ?? '') && rules.some((r) => d.cap! >= r.a && d.cap! <= r.b)) return t; continue; }
+    const n = normPlace(t);
+    if (n && (n === city || n === prov)) return t;
+  }
+  return null;
 }
 
 /* ---------- finestra di prenotazione ---------- */
@@ -128,3 +154,8 @@ export const saveReportSetting = (db: Db, t: string, r: ReportSetting) => put(db
 export interface ReportState { lastAuto?: string; lastTimeDay?: string }
 export const getReportState = (db: Db, t: string) => get<ReportState>(db, t, 'report_state', {});
 export const saveReportState = async (db: Db, t: string, patch: ReportState) => put(db, t, 'report_state', { ...(await getReportState(db, t)), ...patch });
+
+/** Percorso dei messaggi. askPin: dopo il Sì chiede "Hai ricevuto il PIN?" prima di confermare. */
+export interface FlowSetting { askPin: boolean }
+export const getFlow = (db: Db, t: string) => get<FlowSetting>(db, t, 'flow', { askPin: true });
+export const saveFlow = (db: Db, t: string, f: FlowSetting) => put(db, t, 'flow', f);

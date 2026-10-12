@@ -14,9 +14,15 @@ export const MAX_ROWS = 1000;
 
 export interface ImportRow {
   line: number; // riga del foglio Excel
+  sheet: string; // nome del foglio
   name: string;
   address: string;
-  cap: string;
+  cap: string; // può essere vuoto se il file non ha la colonna CAP
+  city: string;
+  province: string;
+  cod_amount: number; // contrassegno da pagare (0 = nessuno)
+  pickup: boolean; // ritiro del vecchio prodotto (priorità 90 o 98)
+  source: { h: string; v: unknown }[]; // riga originale, per il report con le stesse colonne del file
   phone: string; // formato +39...
   email: string;
   product: string;
@@ -32,24 +38,31 @@ export interface PlannedRow extends ImportRow {
   auto: boolean; // fascia scelta dal sistema
 }
 
-type Field = 'name' | 'surname' | 'address' | 'city' | 'cap' | 'phone' | 'email' | 'product' | 'order_ref' | 'date' | 'band';
+type Field = 'name' | 'surname' | 'address' | 'city' | 'province' | 'cap' | 'phone' | 'phone2' | 'email' | 'product' | 'order_ref' | 'date' | 'band' | 'cod' | 'priority';
+
+/** Valori della colonna "Priorita Evasione" che indicano il ritiro del vecchio prodotto. */
+export const PICKUP_CODES = [90, 98];
 
 const ALIASES: Record<Field, string[]> = {
-  name: ['nome', 'cliente', 'nome cliente', 'nominativo', 'nome e cognome', 'nome cognome', 'cognome e nome', 'ragione sociale', 'destinatario'],
+  name: ['nome', 'cliente', 'nome cliente', 'nominativo', 'nome e cognome', 'nome cognome', 'cognome e nome', 'ragione sociale', 'destinatario', 'destinatario merce'],
   surname: ['cognome'],
-  address: ['indirizzo', 'via', 'indirizzo consegna', 'indirizzo di consegna', 'recapito'],
-  city: ['citta', 'comune', 'localita', 'paese'],
+  address: ['indirizzo', 'via', 'indirizzo consegna', 'indirizzo di consegna', 'recapito', 'arri via'],
+  city: ['citta', 'comune', 'localita', 'paese', 'arri localita'],
+  province: ['provincia', 'prov', 'pr', 'arri pr', 'sigla provincia'],
   cap: ['cap', 'codice postale', 'c a p'],
-  phone: ['telefono', 'cellulare', 'whatsapp', 'tel', 'cell', 'numero', 'numero di telefono', 'telefono cellulare', 'mobile'],
+  phone: ['telefono', 'cellulare', 'whatsapp', 'tel', 'cell', 'numero', 'numero di telefono', 'telefono cellulare', 'mobile', 'dest numero telefono1', 'numero telefono1', 'telefono1', 'telefono 1'],
+  phone2: ['dest numero telefono2', 'numero telefono2', 'telefono2', 'telefono 2', 'altro telefono'],
   email: ['email', 'e mail', 'mail', 'posta elettronica', 'indirizzo email'],
-  product: ['prodotto', 'articolo', 'descrizione', 'modello', 'merce'],
-  order_ref: ['ordine', 'n ordine', 'numero ordine', 'nr ordine', 'codice ordine', 'rif', 'riferimento', 'id ordine', 'ordine n'],
+  product: ['prodotto', 'brand', 'marca', 'articolo', 'descrizione', 'modello', 'merce'],
+  order_ref: ['ordine', 'n ordine', 'numero ordine', 'nr ordine', 'codice ordine', 'rif', 'riferimento', 'id ordine', 'ordine n', 'clie rif ordine', 'rif ordine', 'riferimento ordine'],
+  cod: ['importo contrassegno', 'contrassegno', 'importo da pagare'],
+  priority: ['priorita evasione', 'priorita'],
   date: ['data', 'data consegna', 'data di consegna', 'data proposta', 'giorno'],
   band: ['fascia', 'fascia oraria', 'orario', 'ora', 'ora consegna', 'orario consegna'],
 };
 
 const norm = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-const fieldOf = (header: string): Field | null => {
+export const fieldOf = (header: string): Field | null => {
   const h = norm(header);
   if (!h) return null;
   for (const [f, list] of Object.entries(ALIASES) as [Field, string[]][]) if (list.includes(h)) return f;
@@ -115,53 +128,78 @@ export function normalizePhone(v: string): string | 'invalid' {
 
 const emailOk = (s: string) => z.string().email().safeParse(s).success;
 
-/** Legge il primo foglio che ha una riga di intestazione riconoscibile. */
+/** Importo "300", 157.71, "1.234,50 €" → numero */
+export function parseAmount(v: string | number | Date | null): number {
+  if (typeof v === 'number') return Math.max(0, Math.round(v * 100) / 100);
+  if (typeof v !== 'string') return 0;
+  let t = v.replace(/[^\d,.-]/g, '');
+  if (t.includes(',')) t = t.replace(/\./g, '').replace(',', '.');
+  const n = Number(t);
+  return Number.isFinite(n) && n > 0 ? Math.round(n * 100) / 100 : 0;
+}
+
+/** Valore di cella salvabile in JSON (le date diventano {d: "AAAA-MM-GG"} per riscriverle come date nel report). */
+function jsonCell(v: string | number | Date | null): unknown {
+  if (v instanceof Date) return isNaN(v.getTime()) ? null : { d: v.toISOString() };
+  return v;
+}
+
+/**
+ * Legge tutti i fogli che hanno una riga di intestazione riconoscibile (cliente, indirizzo e telefono o email).
+ * Un file con più fogli (es. uno per zona) viene letto per intero.
+ */
 export async function parseWorkbook(buf: Buffer): Promise<{ rows: ImportRow[]; errors: PlannedRow[]; missing: string[] }> {
   const wb = new ExcelJS.Workbook();
   try { await wb.xlsx.load(buf as unknown as ArrayBuffer); }
   catch { throw new Error('Il file non è un Excel valido. Salvalo in formato .xlsx e riprova.'); }
 
+  const rows: ImportRow[] = [], errors: PlannedRow[] = [];
+  let missingBest: string[] | null = null, used = 0;
   for (const ws of wb.worksheets) {
     // cerca l'intestazione nelle prime 10 righe
     for (let h = 1; h <= Math.min(10, ws.rowCount); h++) {
       const cols = new Map<Field, number>();
+      const headers: { col: number; h: string }[] = [];
       ws.getRow(h).eachCell((cell, col) => {
-        const f = fieldOf(asText(cellValue(cell.value)));
+        const text = asText(cellValue(cell.value));
+        if (text) headers.push({ col, h: text });
+        const f = fieldOf(text);
         if (f && !cols.has(f)) cols.set(f, col);
       });
       if (cols.size < 2) continue;
-
       const missing = [
         !cols.has('name') && 'Cliente (o Nome)',
         !cols.has('address') && 'Indirizzo',
-        !cols.has('cap') && 'CAP',
-        !cols.has('phone') && !cols.has('email') && 'Telefono o Email',
+        !cols.has('phone') && !cols.has('phone2') && !cols.has('email') && 'Telefono o Email',
       ].filter(Boolean) as string[];
-      if (missing.length) return { rows: [], errors: [], missing };
+      if (missing.length) { if (!missingBest || missing.length < missingBest.length) missingBest = missing; break; } // foglio di altro tipo
+      used++;
 
-      const rows: ImportRow[] = [], errors: PlannedRow[] = [];
       for (let r = h + 1; r <= ws.rowCount; r++) {
         const row = ws.getRow(r);
         const raw = (f: Field) => (cols.has(f) ? cellValue(row.getCell(cols.get(f)!).value) : null);
         const txt = (f: Field) => asText(raw(f));
-        if (!(Object.keys(ALIASES) as Field[]).some((f) => txt(f))) continue; // riga vuota
+        if (!txt('name') && !txt('address') && !txt('phone') && !txt('email') && !txt('order_ref')) continue; // riga vuota
         if (rows.length + errors.length >= MAX_ROWS) throw new Error(`Il file ha più di ${MAX_ROWS} consegne: dividilo in più file.`);
 
         const err: string[] = [];
         const name = [txt('name'), txt('surname')].filter(Boolean).join(' ');
+        const city = txt('city'), province = txt('province').toUpperCase().slice(0, 4);
         let address = txt('address');
-        const city = txt('city');
         if (city && !norm(address).includes(norm(city))) address = address ? `${address}, ${city}` : city;
+        if (province && address && !address.includes(`(${province})`)) address = `${address} (${province})`;
         const capRaw = raw('cap');
         const cap = typeof capRaw === 'number' ? String(Math.round(capRaw)).padStart(5, '0') : txt('cap').replace(/\s/g, '');
-        const phone = normalizePhone(txt('phone'));
+        let phone = normalizePhone(txt('phone'));
+        if (!phone || phone === 'invalid') { const p2 = normalizePhone(txt('phone2')); if (p2 && p2 !== 'invalid') phone = p2; }
         const email = txt('email').toLowerCase();
         const date = parseDate(raw('date'));
         const band = parseBand(raw('band'));
+        const prio = Number(String(txt('priority')).replace(',', '.'));
 
         if (!name) err.push('manca il nome');
         if (address.length < 3) err.push("manca l'indirizzo");
-        if (!/^\d{5}$/.test(cap)) err.push(cap ? `CAP non valido (${cap})` : 'manca il CAP');
+        if (cap && !/^\d{5}$/.test(cap)) err.push(`CAP non valido (${cap})`);
         if (phone === 'invalid') err.push(`telefono non valido (${txt('phone')})`);
         if (email && !emailOk(email)) err.push(`email non valida (${email})`);
         if (!(phone && phone !== 'invalid') && !(email && emailOk(email))) if (!err.some((e) => e.startsWith('telefono') || e.startsWith('email'))) err.push('serve almeno telefono o email');
@@ -169,7 +207,10 @@ export async function parseWorkbook(buf: Buffer): Promise<{ rows: ImportRow[]; e
         if (band === 'invalid') err.push(`fascia non valida (${txt('band')})`);
 
         const item: ImportRow = {
-          line: r, name: name.slice(0, 200), address: address.slice(0, 300), cap,
+          line: r, sheet: ws.name, name: name.slice(0, 200), address: address.slice(0, 300), cap: /^\d{5}$/.test(cap) ? cap : '',
+          city: city.slice(0, 120), province,
+          cod_amount: parseAmount(raw('cod')), pickup: PICKUP_CODES.includes(prio),
+          source: headers.map(({ col, h: hd }) => ({ h: hd, v: jsonCell(cellValue(row.getCell(col).value)) })),
           phone: phone === 'invalid' ? '' : phone, email: email && emailOk(email) ? email : '',
           product: txt('product').slice(0, 120), order_ref: txt('order_ref').slice(0, 60),
           date: date === 'invalid' ? null : date, band: band === 'invalid' ? null : band,
@@ -177,10 +218,11 @@ export async function parseWorkbook(buf: Buffer): Promise<{ rows: ImportRow[]; e
         if (err.length) errors.push({ ...item, errors: err, slot: null, slotIssue: null, auto: false });
         else rows.push(item);
       }
-      return { rows, errors, missing: [] };
+      break; // intestazione trovata: passa al foglio successivo
     }
   }
-  return { rows: [], errors: [], missing: ['intestazioni delle colonne (Cliente, Indirizzo, CAP, Telefono o Email)'] };
+  if (!used) return { rows: [], errors: [], missing: missingBest ?? ['intestazioni delle colonne (Cliente, Indirizzo, Telefono o Email)'] };
+  return { rows, errors, missing: [] };
 }
 
 interface SlotRow { id: string; date: string; start: string; end: string; free: number }
@@ -256,6 +298,8 @@ export async function templateWorkbook(bands: string[]): Promise<Buffer> {
     { header: 'Prodotto', key: 'p', width: 18 },
     { header: 'Data', key: 'd', width: 12 },
     { header: 'Fascia', key: 'f', width: 13 },
+    { header: 'Importo Contrassegno', key: 'k', width: 12 },
+    { header: 'Priorita Evasione', key: 'r', width: 10 },
   ];
   ws.getRow(1).font = { bold: true };
   ws.getColumn('c').numFmt = '@';
@@ -272,6 +316,8 @@ export async function templateWorkbook(bands: string[]): Promise<Buffer> {
     'Data e Fascia: facoltative. Se le lasci vuote il sistema propone la prima fascia libera.',
     'Se scrivi solo la Data, propone la prima fascia libera di quel giorno. Se scrivi solo la Fascia, il primo giorno con quella fascia libera.',
     `Fasce attive: ${bands.join(', ') || 'vedi "Slot e capienza" nel pannello'}. Puoi scrivere anche solo l'ora di inizio, per esempio 8 o 8:00.`,
+    'Importo Contrassegno: se maggiore di 0 il cliente riceve il promemoria del contrassegno da pagare. Priorita Evasione 90 o 98: ritiro del vecchio prodotto.',
+    'Si possono caricare anche file con più fogli (uno per zona): vengono letti tutti.',
     'Telefono: anche senza +39. Il cliente riceve il messaggio su WhatsApp se c\'è il telefono, altrimenti per email.',
   ].forEach((t) => help.addRow([t]));
   return Buffer.from(await wb.xlsx.writeBuffer());

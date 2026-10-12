@@ -260,6 +260,14 @@ a.btn{text-decoration:none;color:inherit;display:inline-flex;align-items:center}
 .btn.danger{color:var(--red)}
 #repAtBox .inline{display:flex;gap:8px;align-items:center}
 #repAtBox input[type=time]{max-width:170px}
+.s-attesa_pin{--c:var(--amber);--cs:var(--amber-soft)}
+.tagx{display:inline-block;font-size:11px;font-weight:600;border-radius:4px;padding:0 5px;margin-left:4px;background:var(--amber-soft);color:var(--amber)}
+.tagx.pk{background:var(--blue-soft);color:var(--blue)}
+.tagx.ns{background:var(--violet-soft);color:var(--violet)}
+.row .who{display:block;font-size:inherit;color:inherit}
+.row .who small{display:block}
+.row .who .tagx{margin:3px 4px 0 0;white-space:nowrap}
+.imptab .tagx{display:inline-block;margin:3px 4px 0 0;white-space:nowrap}
 </style>
 </head>
 <body>
@@ -321,7 +329,7 @@ a.btn{text-decoration:none;color:inherit;display:inline-flex;align-items:center}
       <div class="pane" id="p-new" hidden>
         <fieldset id="imp">
           <legend>Carica le consegne da Excel</legend>
-          <p class="note">Una riga per consegna. Colonne necessarie: <b>Cliente</b>, <b>Indirizzo</b>, <b>CAP</b> e almeno uno tra <b>Telefono</b> ed <b>Email</b>. Facoltative: Ordine, Prodotto, Data e Fascia. Prima dell'invio puoi scegliere data e fascia per ogni cliente o compilarle in automatico.</p>
+          <p class="note">Una riga per consegna; se il file ha più fogli (es. uno per zona) li leggo tutti. Colonne necessarie: <b>Cliente</b>, <b>Indirizzo</b> e almeno uno tra <b>Telefono</b> ed <b>Email</b>. Facoltative: CAP, Località, Provincia, Ordine, Prodotto (o Brand), Importo Contrassegno, Priorita Evasione, Data e Fascia. Prima dell'invio puoi scegliere data e fascia per ogni cliente o compilarle in automatico.</p>
           <div class="btngroup">
             <label class="btn primary filebtn">Scegli il file Excel<input type="file" id="impFile" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"></label>
             <a class="btn" href="/api/panel/import/template" download>Scarica il modello</a>
@@ -401,6 +409,11 @@ a.btn{text-decoration:none;color:inherit;display:inline-flex;align-items:center}
           <div class="areasum" id="areaSum"></div>
         </fieldset>
         <fieldset>
+          <legend>Non mandare il primo messaggio a</legend>
+          <label class="f">CAP, località o sigle di provincia, uno per riga (o separati da virgole)<textarea id="areaNoSend" rows="4" class="mono" spellcheck="false" placeholder="20121&#10;201*&#10;ANDRANO&#10;LE"></textarea></label>
+          <p class="hint note">Questi clienti vengono inseriti ma <b>non ricevono il primo messaggio</b>: la consegna compare subito come "Fuori area, da contattare" e la data la assegni tu. Funziona anche se il file Excel non ha la colonna CAP: in quel caso scrivi la località (es. <span class="mono">ANDRANO</span>) o la provincia (es. <span class="mono">LE</span>).</p>
+        </fieldset>
+        <fieldset>
           <legend>Prova un CAP</legend>
           <div class="areatest"><label class="f">CAP<input id="areaTest" inputmode="numeric" maxlength="5" placeholder="20135"></label><span id="areaTestOut"></span></div>
         </fieldset>
@@ -410,6 +423,7 @@ a.btn{text-decoration:none;color:inherit;display:inline-flex;align-items:center}
 
       <div class="pane" id="p-msg" hidden>
         <p class="note">Modifica i testi che riceve il cliente. Mentre scrivi, il telefono a destra mostra l'anteprima con i dati di una consegna reale. I campi tra parentesi graffe vengono sostituiti con i dati di ogni cliente.</p>
+        <div class="days"><label><input type="checkbox" id="flowPin"> Dopo il Sì chiedi "Hai ricevuto il PIN?"</label></div>
         <div class="vars" id="vars"></div>
         <div id="msgFields" class="msgfields"></div>
         <p class="err" id="mErr" hidden></p>
@@ -447,8 +461,8 @@ a.btn{text-decoration:none;color:inherit;display:inline-flex;align-items:center}
 <script>
 (() => {
 const DAYN = ['Dom','Lun','Mar','Mer','Gio','Ven','Sab'];
-const ACTIVE = new Set(['inviato','confermato','riprogrammato','consegnata','senza_risposta']);
-const STATUS = {inviato:'In attesa', confermato:'Confermata', da_riprogrammare:'Da riprogrammare', riprogrammato:'Riprogrammata', fuori_area:'Fuori area, da contattare', consegnata:'Consegnata', senza_risposta:'Senza risposta', annullata:'Annullata'};
+const ACTIVE = new Set(['inviato','attesa_pin','confermato','riprogrammato','consegnata','senza_risposta']);
+const STATUS = {inviato:'In attesa', attesa_pin:'Attesa risposta PIN', confermato:'Confermata', da_riprogrammare:'Da riprogrammare', riprogrammato:'Riprogrammata', fuori_area:'Fuori area, da contattare', consegnata:'Consegnata', senza_risposta:'Senza risposta', annullata:'Annullata'};
 const DEFAULT_CFG = {bands:[], days:[], horizon:14, lead:1};
 
 const pad = n => String(n).padStart(2,'0');
@@ -493,7 +507,7 @@ async function load(){
   try {
     const st = await api('/state');
     const cfgChanged = !same(cfg, st.schedule), areaChanged = !same(area, st.area), msgChanged = !same(msgs, st.messages);
-    cfg = st.schedule; area = st.area; msgs = {...MSG_DEFAULT, ...st.messages}; deliveries = st.deliveries;
+    cfg = st.schedule; area = st.area; msgs = {...MSG_DEFAULT, ...st.messages}; deliveries = st.deliveries; flow = st.flow || {askPin:true}; $('flowPin').checked = !!flow.askPin;
     if (cfgChanged && !ui.slotDirty) renderSlotEditor();
     if (areaChanged && !areaDirty) renderAreaEditor();
     if (msgChanged && !msgDraft) renderMsgEditor();
@@ -560,8 +574,8 @@ function inAreaWith(a, cap){
 const inArea = cap => inAreaWith(area, cap);
 const capOf = x => x.cap || (/\b(\d{5})\b/.exec(x.address || '') || [])[1] || '';
 
-function readArea(){ return {on: $('areaOn').checked, list: $('areaList').value, callAll: $('areaCall').checked}; }
-function renderAreaEditor(){ $('areaOn').checked = area.on; $('areaCall').checked = !!area.callAll; $('areaList').value = area.list; areaDirty = false; updateArea(); }
+function readArea(){ return {on: $('areaOn').checked, list: $('areaList').value, callAll: $('areaCall').checked, noSend: $('areaNoSend').value}; }
+function renderAreaEditor(){ $('areaOn').checked = area.on; $('areaCall').checked = !!area.callAll; $('areaNoSend').value = area.noSend || ''; $('areaList').value = area.list; areaDirty = false; updateArea(); }
 function updateArea(){
   const a = readArea(), {rules, bad} = parseArea(a.list);
   $('areaErr').textContent = bad.length ? `Non riconosciuto: ${bad.slice(0,3).join(', ')}. Usa 20121, 20121-20162 oppure 201*.` : '';
@@ -582,6 +596,7 @@ function updateArea(){
   else { out.textContent = 'Fuori area: riceve il messaggio dedicato'; out.classList.add('out'); }
 }
 $('p-area').addEventListener('input', e => { if (e.target.id !== 'areaTest') areaDirty = true; updateArea(); });
+$('areaNoSend').addEventListener('input', () => { areaDirty = true; });
 $('p-area').addEventListener('change', e => { if (e.target.id === 'areaOn' || e.target.id === 'areaCall'){ areaDirty = true; updateArea(); } });
 $('undoArea').onclick = () => { renderAreaEditor(); toast('Modifiche annullate'); };
 $('saveArea').onclick = async () => {
@@ -619,8 +634,14 @@ const MSG_DEFAULT = {
   page_title: 'Quando vuoi ricevere il pacco?',
   page_note: 'Ordine {ordine} · {indirizzo}. Vedi solo le fasce con posti liberi, aggiornate in tempo reale.',
   page_button: 'Conferma {data}, {fascia}',
+  wa_pin_question: 'Hai ricevuto il PIN?',
+  wa_pin_yes: 'Sì',
+  wa_pin_no: 'No',
+  extra_address: 'Indirizzo di consegna: {indirizzo}',
+  extra_cod: "Ricorda che c'è il contrassegno da pagare di {contrassegno}.",
+  extra_pickup: 'Ricorda di preparare al corriere il prodotto da ritirare.',
 };
-const VARS = {azienda:'nome della tua azienda', nome:'nome del cliente', prodotto:'prodotto ordinato', ordine:'numero ordine', data:'data di consegna', inizio:'inizio fascia', fine:'fine fascia', fascia:'fascia completa, es. 08:00–11:00', indirizzo:'indirizzo', link:'link per scegliere la data'};
+const VARS = {azienda:'nome della tua azienda', contrassegno:'importo del contrassegno, es. € 300,00', nome:'nome del cliente', prodotto:'prodotto ordinato', ordine:'numero ordine', data:'data di consegna', inizio:'inizio fascia', fine:'fine fascia', fascia:'fascia completa, es. 08:00–11:00', indirizzo:'indirizzo', link:'link per scegliere la data'};
 // st = stato della consegna in cui il testo compare: serve all'anteprima
 const MSG_FIELDS = [
   {g:'WhatsApp', ch:'wa', items:[
@@ -631,6 +652,16 @@ const MSG_FIELDS = [
     {k:'wa_declined', label:'Risposta dopo il rifiuto', st:'da_riprogrammare', rows:3, req:['link'], hint:'Deve contenere {link}: è il collegamento per scegliere la nuova data.'},
     {k:'wa_rescheduled', label:'Conferma della nuova data', st:'riprogrammato', rows:2},
     {k:'wa_out_area', label:'Risposta dopo il rifiuto, fuori area', st:'fuori_area', rows:3, hint:'Lo riceve chi risponde No ma ha un CAP fuori dall\'area servita, oppure tutti quelli che rispondono No se in "Area servita" è spuntato "Se clicca NO va richiamato".'},
+  ]},
+  {g:'Domanda sul PIN (dopo il Sì)', ch:'wa', items:[
+    {k:'wa_pin_question', label:'Domanda', st:'attesa_pin', rows:2, hint:'Arriva subito dopo il Sì, con i due pulsanti qui sotto. Se risponde No riceve la "Risposta dopo il rifiuto, fuori area" e va richiamato. Si attiva o spegne con la casella in alto.'},
+    {k:'wa_pin_yes', label:'Pulsante Sì', st:'attesa_pin', max:20, novars:true},
+    {k:'wa_pin_no', label:'Pulsante No', st:'attesa_pin', max:20, novars:true},
+  ]},
+  {g:'Aggiunte al messaggio di conferma', ch:'wa', items:[
+    {k:'extra_address', label:'Indirizzo di consegna', st:'confermato', rows:2, hint:'Si aggiunge sotto la conferma (se il testo della conferma non contiene già {indirizzo}).'},
+    {k:'extra_cod', label:'Contrassegno da pagare', st:'confermato', rows:2, hint:'Solo per i clienti con "Importo Contrassegno" maggiore di 0 nel file Excel.'},
+    {k:'extra_pickup', label:'Ritiro del vecchio prodotto', st:'confermato', rows:2, hint:'Solo per i clienti con "Priorita Evasione" 90 o 98 nel file Excel.'},
   ]},
   {g:'Email', ch:'mail', items:[
     {k:'mail_subject', label:'Oggetto', st:'inviato', max:120},
@@ -649,7 +680,20 @@ const MSG_FIELDS = [
     {k:'page_button', label:'Pulsante di conferma', st:'pick', max:60, hint:'Qui {data} e {fascia} sono quelle che il cliente ha appena selezionato.'},
   ]},
 ];
-let msgs = {...MSG_DEFAULT}, msgDraft = null, msgFocus = null;
+let msgs = {...MSG_DEFAULT}, msgDraft = null, msgFocus = null, flow = {askPin:true};
+$('flowPin').addEventListener('change', async e => {
+  try { flow = await api('/flow', {method:'PUT', body:{askPin: e.target.checked}}); toast(flow.askPin ? 'Dopo il Sì verrà chiesto se ha ricevuto il PIN' : 'Domanda sul PIN spenta: il Sì conferma subito'); renderPhone(); }
+  catch (err){ e.target.checked = !e.target.checked; toast(err.message); }
+});
+/** Conferma completa come la riceve il cliente: testo + indirizzo + contrassegno + ritiro. */
+function CONF(key, x){
+  const src = (ui.tab === 'msg' && msgDraft) ? msgDraft : msgs;
+  const parts = [T(key, x, 'current')];
+  if (!String(src[key] || '').includes('{indirizzo}')) parts.push(T('extra_address', x, 'current'));
+  if ((x.cod || 0) > 0) parts.push(T('extra_cod', x, 'current'));
+  if (x.pickup) parts.push(T('extra_pickup', x, 'current'));
+  return parts.join('<br>');
+}
 
 /** Compone un testo: escape, sostituzione dei campi, a capo. */
 function T(key, x, which){
@@ -657,7 +701,7 @@ function T(key, x, which){
   const tpl = src[key] ?? MSG_DEFAULT[key] ?? '';
   const ref = which === 'proposed' && x.proposed ? x.proposed : (x.date ? {date:x.date, bandId:x.bandId} : (x.proposed || {}));
   const b = band(ref.bandId);
-  const v = {azienda:me?.tenant_name || '', nome:x.name.split(' ')[0], prodotto:x.product || 'ordine', ordine:x.code, data:ref.date ? fmtLong(ref.date) : '', inizio:b?.start ?? '', fine:b?.end ?? '', fascia:bandLabel(ref.bandId), indirizzo:x.address};
+  const v = {azienda:me?.tenant_name || '', contrassegno:(x.cod || 0).toLocaleString('it-IT',{style:'currency',currency:'EUR'}), nome:x.name.split(' ')[0], prodotto:x.product || 'ordine', ordine:x.code, data:ref.date ? fmtLong(ref.date) : '', inizio:b?.start ?? '', fine:b?.end ?? '', fascia:bandLabel(ref.bandId), indirizzo:x.address};
   return esc(tpl).replace(/\{(\w+)\}/g, (m, k) =>
     k === 'link' ? `<button class="lnk" data-pick>${esc(bookingUrl(x))}</button>` : (k in v ? esc(v[k]) : m)
   ).replace(/\n/g, '<br>');
@@ -774,7 +818,7 @@ function renderCal(){
 }
 const FILTERS = [
   {k:'tutte', label:'Tutte', test:() => true},
-  {k:'daconf', label:'Da confermare', test:x => ['inviato','da_riprogrammare','fuori_area','senza_risposta'].includes(x.status)},
+  {k:'daconf', label:'Da confermare', test:x => ['inviato','attesa_pin','da_riprogrammare','fuori_area','senza_risposta'].includes(x.status)},
   {k:'conf', label:'Confermate', test:x => ['confermato','riprogrammato'].includes(x.status)},
   {k:'chiudere', label:'Da chiudere', test:x => isToClose(x)},
   {k:'eseguite', label:'Eseguite', test:x => x.status === 'consegnata'},
@@ -825,7 +869,7 @@ function renderList(){
   else $('list').innerHTML = `<div class="row head"><span>Ordine</span><span>Cliente</span><span>Consegna</span><span>Stato</span><span></span></div>` +
     rows.map(x => `<div class="row ${x.id===ui.simId?'sel':''} ${x.status==='consegnata'?'done':''}">
       <span class="code mono">${esc(x.code)}${x.example?'<span class="tag">esempio</span>':''}</span>
-      <span class="who"><b>${esc(x.name)}</b><small>${esc(x.address)}${capOf(x) ? ' · <span class="mono">'+esc(capOf(x))+'</span>' : ''}${area.on && !inArea(capOf(x)) ? ' · <span class="capout out">fuori area</span>' : ''}${x.failed ? ` · <span class="capout out">${x.failed} ${x.failed===1?'tentativo':'tentativi'} non riusciti</span>` : ''}</small></span>
+      <span class="who"><b>${esc(x.name)}</b><small>${esc(x.address)}${capOf(x) ? ' · <span class="mono">'+esc(capOf(x))+'</span>' : ''}${area.on && !inArea(capOf(x)) ? ' · <span class="capout out">fuori area</span>' : ''}${x.failed ? ` · <span class="capout out">${x.failed} ${x.failed===1?'tentativo':'tentativi'} non riusciti</span>` : ''}${(x.cod||0) > 0 ? `<span class="tagx">contrassegno ${(x.cod).toLocaleString('it-IT',{style:'currency',currency:'EUR'})}</span>` : ''}${x.pickup ? '<span class="tagx pk">ritiro</span>' : ''}</small></span>
       <span class="when">${whenCell(x)}</span>
       <span class="pill s-${x.status}"><i class="dot"></i>${STATUS[x.status]}</span>
       <span class="acts">${rowActions(x)}</span>${rowPanel(x)}</div>`).join('');
@@ -911,6 +955,7 @@ function renderCust(){
   box.innerHTML = `<h3>${esc(x.name)} <span class="pill s-${x.status}"><i class="dot"></i>${STATUS[x.status] || x.status}</span></h3><dl>
     ${row('Ordine', `<span class="mono">${esc(x.code)}</span>`)}${row('Prodotto', esc(x.product))}
     ${row('Indirizzo', esc(x.address))}${row('CAP', x.cap ? `<span class="mono">${esc(x.cap)}</span>${area.on && !inArea(x.cap) ? ' · <span class="capout out">fuori area</span>' : ''}` : '')}
+    ${row('Contrassegno', (x.cod || 0) > 0 ? `<b>${(x.cod).toLocaleString('it-IT',{style:'currency',currency:'EUR'})}</b> da pagare` : '')}${row('Ritiro', x.pickup ? 'da ritirare il vecchio prodotto' : '')}
     ${row('WhatsApp', tel)}${row('Email', mail)}
     ${row('Proposta', prop)}${cur && cur !== prop ? row('Consegna', cur) : ''}</dl>`;
   box.hidden = false;
@@ -932,21 +977,24 @@ function renderPhone(){
       <p style="margin:0">${P('mail_body')}</p>
       <div class="card"><small class="from">Consegna proposta</small><b>${prop.date ? esc(fmtLong(prop.date)) : ''}, ${bandLabel(prop.bandId)}</b></div>
       ${x.status==='inviato' ? `<p style="margin:0">${P('mail_question')}</p><div class="acts"><button class="btn primary" data-ans="yes">${P('mail_yes')}</button><button class="btn" data-ans="no">${P('mail_no')}</button></div>`
-        : x.status==='confermato' ? `<div class="card">${C('mail_confirmed')}</div>`
+        : x.status==='attesa_pin' ? `<div class="card"><b>${C('wa_pin_question')}</b><div class="acts"><button class="btn primary" data-pin="pin_yes">${C('wa_pin_yes')}</button><button class="btn" data-pin="pin_no">${C('wa_pin_no')}</button></div></div>`
+        : x.status==='confermato' ? `<div class="card">${CONF('mail_confirmed', x)}</div>`
         : x.status==='da_riprogrammare' ? `<div class="card"><b>${C('mail_reschedule')}</b><button class="lnk" data-pick>${bookingUrl(x)}</button></div>`
         : x.status==='fuori_area' ? `<div class="card">${C('mail_out_area')}</div>`
         : x.status==='consegnata' ? `<div class="card"><b>Consegna effettuata ✓</b></div>`
-        : `<div class="card">${C('mail_rescheduled')}<button class="lnk" data-pick>Modifica di nuovo</button></div>`}
+        : `<div class="card">${CONF('mail_rescheduled', x)}<button class="lnk" data-pick>Modifica di nuovo</button></div>`}
     </div>`;
     return;
   }
   let chat = `<div class="sysmsg">Oggi</div>
     <div class="bub">${P('wa_proposal')}
       <time>09:00</time><div class="qr"><button data-ans="yes" ${answered?'disabled':''}>${P('wa_yes')}</button><button data-ans="no" ${answered?'disabled':''}>${P('wa_no')}</button></div></div>`;
-  if (x.status === 'confermato') chat += `<div class="bub out">${P('wa_yes')}<time>${nowTime()} ✓✓</time></div><div class="bub">${C('wa_confirmed')}<time>${nowTime()}</time></div>`;
+  const pinQ = (active) => `<div class="bub">${C('wa_pin_question')}<time>${nowTime()}</time><div class="qr"><button data-pin="pin_yes" ${active?'':'disabled'}>${C('wa_pin_yes')}</button><button data-pin="pin_no" ${active?'':'disabled'}>${C('wa_pin_no')}</button></div></div>`;
+  if (x.status === 'attesa_pin') chat += `<div class="bub out">${P('wa_yes')}<time>${nowTime()} ✓✓</time></div>` + pinQ(true);
+  if (x.status === 'confermato') chat += `<div class="bub out">${P('wa_yes')}<time>${nowTime()} ✓✓</time></div>` + (flow.askPin ? pinQ(false) + `<div class="bub out">${C('wa_pin_yes')}<time>${nowTime()} ✓✓</time></div>` : '') + `<div class="bub">${CONF('wa_confirmed', x)}<time>${nowTime()}</time></div>`;
   if (saidNo) chat += `<div class="bub out">${P('wa_no')}<time>${nowTime()} ✓✓</time></div><div class="bub">${C('wa_declined')}<time>${nowTime()}</time></div>`;
   if (x.status === 'fuori_area') chat += `<div class="bub out">${P('wa_no')}<time>${nowTime()} ✓✓</time></div><div class="bub">${C('wa_out_area')}<time>${nowTime()}</time></div>`;
-  if (x.status === 'riprogrammato') chat += `<div class="bub">${C('wa_rescheduled')}<time>${nowTime()}</time></div>`;
+  if (x.status === 'riprogrammato') chat += `<div class="bub">${CONF('wa_rescheduled', x)}<time>${nowTime()}</time></div>`;
   if (x.status === 'consegnata') chat += `<div class="sysmsg">Consegna effettuata ✓</div>`;
   if (x.status === 'senza_risposta') chat += `<div class="sysmsg">Nessuna risposta dopo il sollecito: da contattare</div>`;
   s.innerHTML = sbar + `<div class="chead"><div class="avatar">✓</div><div><b>Servizio consegne</b><small>Per conto di ${esc(me?.tenant_name || '')}</small></div></div><div class="chat" id="chat">${chat}</div>`;
@@ -1022,6 +1070,8 @@ $('screen').addEventListener('click', async e => {
   if (sl && !sl.disabled){ const s = ui.avail.find(a => a.id === sl.dataset.slot); if (s) ui.pick = {id:s.id, date:s.date, bandId:s.bandId}; renderPhone(); return; }
   const ans = e.target.closest('[data-ans]');
   if (ans && !ans.disabled && x.status === 'inviato'){ askAnswer(x, ans.dataset.ans); return; }
+  const pin = e.target.closest('[data-pin]');
+  if (pin && !pin.disabled && x.status === 'attesa_pin'){ askAnswer(x, pin.dataset.pin); return; }
   if (e.target.closest('#pkOk') && ui.pick && ui.pick.id && !ui.busy){
     ui.busy = true; renderPhone();
     try {
@@ -1036,8 +1086,9 @@ $('screen').addEventListener('click', async e => {
 /* Sì / No al posto del cliente, con conferma */
 function askAnswer(x, a){
   const bar = $('askBar');
-  const what = a === 'yes'
-    ? `Rispondere <b>Sì</b> al posto di ${esc(x.name)}? La consegna viene confermata e il cliente riceve il messaggio di conferma.`
+  const what = a === 'pin_yes' ? `Rispondere che ${esc(x.name)} <b>ha ricevuto il PIN</b>? La consegna viene confermata e il cliente riceve la conferma con l'indirizzo.`
+    : a === 'pin_no' ? `Rispondere che ${esc(x.name)} <b>non ha ricevuto il PIN</b>? Il posto si libera e il cliente riceve il messaggio "fuori area": va richiamato.`
+    : a === 'yes' ? `Rispondere <b>Sì</b> al posto di ${esc(x.name)}? ${flow.askPin ? 'Poi compare la domanda "Hai ricevuto il PIN?".' : 'La consegna viene confermata e il cliente riceve il messaggio di conferma.'}`
     : `Rispondere <b>No</b> al posto di ${esc(x.name)}? Il posto viene liberato e il cliente riceve il link per scegliere un'altra data${area.on ? ' (o il messaggio per chi è fuori area)' : ''}.`;
   bar.innerHTML = `<span>${what}</span><button class="btn primary" id="askGo">Conferma</button><button class="btn ghost" id="askNo">Annulla</button>`;
   bar.hidden = false; bar.dataset.id = x.id; bar.dataset.a = a;
@@ -1051,7 +1102,7 @@ $('askBar').addEventListener('click', async e => {
   try {
     const r = await api(`/deliveries/${bar.dataset.id}/answer`, {method:'POST', body:{answer: bar.dataset.a}});
     bar.hidden = true; await load();
-    toast(bar.dataset.a === 'yes' ? 'Consegna confermata' : r.status === 'fuori_area' ? 'Cliente fuori area: passato all\'operatore' : 'Posto liberato: ora puoi scegliere la nuova data dal link nel messaggio');
+    toast(bar.dataset.a === 'yes' ? (r.status === 'attesa_pin' ? 'Ora rispondi alla domanda sul PIN' : 'Consegna confermata') : bar.dataset.a === 'pin_yes' ? 'Consegna confermata' : bar.dataset.a === 'pin_no' ? 'PIN non ricevuto: da richiamare' : r.status === 'fuori_area' ? 'Cliente fuori area: passato all\'operatore' : 'Posto liberato: ora puoi scegliere la nuova data dal link nel messaggio');
   } catch (err){ go.disabled = false; toast(err.message); }
 });
 
@@ -1112,8 +1163,8 @@ function renderImport(){
   const box = $('impPrev');
   if (imp.result){
     const r = imp.result, bad = r.results.filter(x => !x.ok);
-    box.innerHTML = `<div class="imphead"><span class="pill s-confermato"><i class="dot"></i>${r.sent} ${r.sent===1?'messaggio inviato':'messaggi inviati'}</span>${bad.length ? `<span class="pill s-fuori_area"><i class="dot"></i>${bad.length} non ${bad.length===1?'inviata':'inviate'}</span>` : ''}<button class="btn ghost" id="impClose" type="button">Chiudi</button></div>` +
-      (bad.length ? `<div class="impwrap"><table class="imptab"><thead><tr><th>Riga</th><th>Cliente</th><th>Motivo</th></tr></thead><tbody>${bad.map(x => `<tr class="bad"><td class="mono">${x.line}</td><td>${esc(x.name)}</td><td class="why">${esc(x.error||'')}</td></tr>`).join('')}</tbody></table></div><p class="note">Correggi queste righe nel file e caricalo di nuovo: le consegne già inviate vengono riconosciute (dal numero d'ordine, o da nome e indirizzo) e non partono due volte.</p>` : '<p class="note">Le trovi in "Consegne" e nel calendario.</p>');
+    box.innerHTML = `<div class="imphead"><span class="pill s-confermato"><i class="dot"></i>${r.sent} ${r.sent===1?'messaggio inviato':'messaggi inviati'}</span>${r.notSent ? `<span class="pill s-fuori_area"><i class="dot"></i>${r.notSent} senza messaggio, da chiamare</span>` : ''}${bad.length ? `<span class="pill s-fuori_area"><i class="dot"></i>${bad.length} non ${bad.length===1?'inviata':'inviate'}</span>` : ''}<button class="btn ghost" id="impClose" type="button">Chiudi</button></div>` +
+      (bad.length ? `<div class="impwrap"><table class="imptab"><thead><tr><th>Foglio · riga</th><th>Cliente</th><th>Motivo</th></tr></thead><tbody>${bad.map(x => `<tr class="bad"><td class="mono">${x.sheet ? esc(x.sheet)+' · ' : ''}${x.line}</td><td>${esc(x.name)}</td><td class="why">${esc(x.error||'')}</td></tr>`).join('')}</tbody></table></div><p class="note">Correggi queste righe nel file e caricalo di nuovo: le consegne già inviate vengono riconosciute (dal numero d'ordine, o da nome e indirizzo) e non partono due volte.</p>` : '<p class="note">Le trovi in "Consegne" e nel calendario.</p>');
     return;
   }
   if (!imp.rows){ box.innerHTML = ''; return; }
@@ -1130,8 +1181,8 @@ function renderImport(){
       <button class="btn" id="impAll" type="button">Applica</button>
     </div>
     <p class="note">"Compila in automatico" usa le fasce e le capienze di "Slot e capienza": a ogni cliente la prima fascia libera dal preavviso minimo in poi. Puoi poi cambiare data e fascia riga per riga.</p>
-    <div class="impwrap"><table class="imptab"><thead><tr><th>Riga</th><th>Cliente</th><th>Indirizzo</th><th>Contatti</th><th>Ordine</th><th>Data proposta</th><th>Fascia oraria</th></tr></thead><tbody>${
-    imp.rows.map((x, i) => `<tr class="${!impSendable(x)?'bad':x.issue?'warnrow':''}"><td class="mono">${x.line}</td><td><b>${esc(x.name||'—')}</b>${x.product?`<small>${esc(x.product)}</small>`:''}</td>
+    <div class="impwrap"><table class="imptab"><thead><tr><th>Foglio · riga</th><th>Cliente</th><th>Indirizzo</th><th>Contatti</th><th>Ordine</th><th>Data proposta</th><th>Fascia oraria</th></tr></thead><tbody>${
+    imp.rows.map((x, i) => `<tr class="${!impSendable(x)?'bad':x.issue?'warnrow':''}"><td class="mono">${x.sheet ? esc(x.sheet)+' · ' : ''}${x.line}</td><td><b>${esc(x.name||'—')}</b>${x.product?`<small>${esc(x.product)}</small>`:''}${(x.cod_amount||0) > 0 ? `<span class="tagx">contrassegno ${x.cod_amount.toLocaleString('it-IT',{style:'currency',currency:'EUR'})}</span>` : ''}${x.pickup ? '<span class="tagx pk">ritiro</span>' : ''}${x.noSend ? `<span class="tagx ns" title="In Area servita è escluso: ${esc(x.noSend)}">nessun messaggio, da chiamare</span>` : ''}</td>
       <td>${esc(x.address)}<small class="mono">${esc(x.cap)}${x.cap && area.on && !inArea(x.cap) ? ' · fuori area' : ''}</small></td>
       <td>${x.phone?`<span class="mono">${esc(x.phone)}</span>`:''}${x.email?`<small>${esc(x.email)}</small>`:''}</td>
       <td class="mono">${esc(x.order_ref) || '<small>automatico</small>'}</td>
@@ -1163,7 +1214,7 @@ $('impPrev').addEventListener('click', async e => {
   }
   if (!e.target.closest('#impGo') || imp.busy) return;
   impCheck();
-  const rows = imp.rows.filter(x => impSendable(x) && !x.issue).map(({errors, slot, slotIssue, auto, sel, issue, ...r}) => ({...r, date: sel.date, band: sel.bandId.split('-')[0]}));
+  const rows = imp.rows.filter(x => impSendable(x) && !x.issue).map(({errors, slot, slotIssue, auto, sel, issue, noSend, ...r}) => ({...r, date: sel.date, band: sel.bandId.split('-')[0]}));
   imp.busy = true; renderImport();
   try {
     imp.result = await api('/import/commit', {body:{rows}}); imp.rows = null;

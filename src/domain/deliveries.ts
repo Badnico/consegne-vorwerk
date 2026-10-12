@@ -4,14 +4,14 @@ import { DomainError, invalidState, notFound, slotFull } from '../lib/errors.js'
 import { todayLocal } from '../lib/dates.js';
 import { getSlot, release, reserve, bookingWindow } from './slots.js';
 import { extendToken } from './tokens.js';
-import { canSelfBook, getArea } from './settings.js';
+import { canSelfBook, getArea, getFlow } from './settings.js';
 
 export type Status =
   | 'proposed' | 'confirmed' | 'to_reschedule' | 'rescheduled'
-  | 'out_of_area' | 'no_response' | 'cancelled' | 'delivered';
+  | 'out_of_area' | 'no_response' | 'cancelled' | 'delivered' | 'pin_check';
 
 /** Stati in cui la consegna occupa un posto nel suo slot */
-export const HOLDS_SEAT: Status[] = ['proposed', 'confirmed', 'rescheduled', 'delivered'];
+export const HOLDS_SEAT: Status[] = ['proposed', 'pin_check', 'confirmed', 'rescheduled', 'delivered'];
 
 export interface DeliveryView {
   id: string;
@@ -22,6 +22,11 @@ export interface DeliveryView {
   status: Status;
   address: string;
   cap: string | null;
+  city: string | null;
+  province: string | null;
+  cod_amount: string; // numeric da Postgres
+  pickup: boolean;
+  source: { h: string; v: unknown }[] | null;
   product: string | null;
   customer_id: string;
   customer_name: string;
@@ -49,10 +54,15 @@ export interface NewDelivery {
   cap?: string | null;
   product?: string | null;
   slot_id: string;
+  city?: string | null;
+  province?: string | null;
+  cod_amount?: number;
+  pickup?: boolean;
+  source?: { h: string; v: unknown }[] | null;
 }
 
 const VIEW_SQL = `
-  SELECT d.id, d.tenant_id, t.name AS tenant_name, t.email AS tenant_email, d.order_ref, d.status, d.address, d.cap, d.product, d.customer_id, d.slot_id, d.proposed_slot_id,
+  SELECT d.id, d.tenant_id, t.name AS tenant_name, t.email AS tenant_email, d.order_ref, d.status, d.address, d.cap, d.city, d.province, d.cod_amount, d.pickup, d.source, d.product, d.customer_id, d.slot_id, d.proposed_slot_id,
          d.reminders_sent, d.failed_attempts, d.delivered_at, d.created_at,
          c.name AS customer_name, c.phone_e164, c.email, c.consent_whatsapp,
          s.date, s.start_time, s.end_time,
@@ -117,9 +127,10 @@ export async function createDelivery(tenantId: string, input: NewDelivery, actor
       [input.customer.name, input.customer.phone_e164 ?? null, input.customer.email ?? null, input.customer.consent_whatsapp ?? false, tenantId],
     );
     const d = await c.query<{ id: string }>(
-      `INSERT INTO deliveries (tenant_id, order_ref, customer_id, address, cap, product, slot_id, proposed_slot_id, status)
-       VALUES ($7, $1, $2, $3, $4, $5, $6, $6, 'proposed') RETURNING id`,
-      [input.order_ref, cust.rows[0]!.id, input.address, input.cap ?? null, input.product ?? null, slot.id, tenantId],
+      `INSERT INTO deliveries (tenant_id, order_ref, customer_id, address, cap, product, slot_id, proposed_slot_id, status, city, province, cod_amount, pickup, source)
+       VALUES ($7, $1, $2, $3, $4, $5, $6, $6, 'proposed', $8, $9, $10, $11, $12) RETURNING id`,
+      [input.order_ref, cust.rows[0]!.id, input.address, input.cap ?? null, input.product ?? null, slot.id, tenantId,
+        input.city ?? null, input.province ?? null, input.cod_amount ?? 0, input.pickup ?? false, input.source ? JSON.stringify(input.source) : null],
     );
     const id = d.rows[0]!.id;
     await logEvent(c, id, null, 'proposed', actor);
@@ -128,12 +139,44 @@ export async function createDelivery(tenantId: string, input: NewDelivery, actor
 }
 
 /** Il cliente dice Sì. */
-export async function confirmDelivery(id: string, actor = 'customer', tenantId?: string) {
+/** Il cliente dice Sì. Se l'ambiente chiede il PIN passa a "pin_check", altrimenti è confermata. Restituisce lo stato finale. */
+export async function confirmDelivery(id: string, actor = 'customer', tenantId?: string): Promise<Status> {
   return tx(async (c) => {
     const row = await lockFor(c, id, ['proposed', 'no_response'], 'conferma', tenantId);
     if (row.status === 'no_response' && !row.slot_id) throw invalidState(row.status, 'conferma');
-    await c.query(`UPDATE deliveries SET status = 'confirmed', updated_at = now() WHERE id = $1`, [id]);
-    await logEvent(c, id, row.status, 'confirmed', actor);
+    const next: Status = (await getFlow(c, row.tenant_id)).askPin ? 'pin_check' : 'confirmed';
+    await c.query(`UPDATE deliveries SET status = $2, updated_at = now() WHERE id = $1`, [id, next]);
+    await logEvent(c, id, row.status, next, actor);
+    return next;
+  });
+}
+
+/**
+ * Risposta a "Hai ricevuto il PIN?". Sì: consegna confermata. No: il posto si libera e la consegna
+ * passa all'operatore (riceve il messaggio "fuori area"). Restituisce lo stato finale.
+ */
+export async function answerPin(id: string, received: boolean, actor = 'customer', tenantId?: string): Promise<Status> {
+  return tx(async (c) => {
+    const row = await lockFor(c, id, ['pin_check'], 'risposta sul PIN', tenantId);
+    if (received) {
+      await c.query(`UPDATE deliveries SET status = 'confirmed', updated_at = now() WHERE id = $1`, [id]);
+      await logEvent(c, id, row.status, 'confirmed', actor, 'PIN ricevuto');
+      return 'confirmed';
+    }
+    if (row.slot_id) await release(c, row.slot_id);
+    await c.query(`UPDATE deliveries SET status = 'out_of_area', slot_id = NULL, updated_at = now() WHERE id = $1`, [id]);
+    await logEvent(c, id, row.status, 'out_of_area', actor, 'PIN non ricevuto: da richiamare');
+    return 'out_of_area';
+  });
+}
+
+/** Primo messaggio non inviato (CAP/località esclusi in "Area servita"): il posto si libera e la consegna passa all'operatore. */
+export async function markNotSent(id: string, reason: string, actor: string) {
+  return tx(async (c) => {
+    const row = await lockFor(c, id, ['proposed'], 'esclusione', undefined);
+    if (row.slot_id) await release(c, row.slot_id);
+    await c.query(`UPDATE deliveries SET status = 'out_of_area', slot_id = NULL, updated_at = now() WHERE id = $1`, [id]);
+    await logEvent(c, id, row.status, 'out_of_area', actor, `Primo messaggio non inviato (escluso: ${reason})`);
   });
 }
 
@@ -144,7 +187,7 @@ export async function confirmDelivery(id: string, actor = 'customer', tenantId?:
  */
 export async function declineDelivery(id: string, actor = 'customer', tenantId?: string): Promise<Status> {
   return tx(async (c) => {
-    const row = await lockFor(c, id, ['proposed', 'confirmed', 'rescheduled', 'no_response'], 'rifiuto', tenantId);
+    const row = await lockFor(c, id, ['proposed', 'pin_check', 'confirmed', 'rescheduled', 'no_response'], 'rifiuto', tenantId);
     if (row.slot_id) await release(c, row.slot_id);
     const next: Status = canSelfBook(await getArea(c, row.tenant_id), row.cap) ? 'to_reschedule' : 'out_of_area';
     await c.query(`UPDATE deliveries SET status = $2, slot_id = NULL, updated_at = now() WHERE id = $1`, [id, next]);

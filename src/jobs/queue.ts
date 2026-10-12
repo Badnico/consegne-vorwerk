@@ -5,7 +5,7 @@ import { pool } from '../lib/db.js';
 import { getDelivery, incrementReminders, markNoResponse, type Status } from '../domain/deliveries.js';
 import { activeTenantIds, generateSlots } from '../domain/slots.js';
 import { purgeExpiredReports, runDueReports } from '../domain/report.js';
-import { sendConfirmation, sendOutOfArea, sendProposal, sendRescheduleLink } from '../notify/notifier.js';
+import { sendPinQuestion, sendConfirmation, sendOutOfArea, sendProposal, sendRescheduleLink } from '../notify/notifier.js';
 
 /**
  * Coda dei lavori su Postgres (pg-boss): nessun Redis da gestire.
@@ -19,6 +19,7 @@ export const Q = {
   expire: 'expire-delivery',
   slots: 'generate-slots',
   reports: 'periodic-reports',
+  askPin: 'ask-pin',
 } as const;
 
 type IdJob = { deliveryId: string };
@@ -51,6 +52,7 @@ export const enqueue = {
   proposal: (deliveryId: string) => q().send(Q.proposal, { deliveryId }, { ...retry, singletonKey: `proposal:${deliveryId}` }),
   afterDecline: (deliveryId: string) => q().send(Q.afterDecline, { deliveryId }, retry),
   afterConfirm: (deliveryId: string) => q().send(Q.afterConfirm, { deliveryId }, retry),
+  askPin: (deliveryId: string) => q().send(Q.askPin, { deliveryId }, retry),
 };
 
 /** Una consegna eliminata dal pannello non deve far fallire (e ritentare) i suoi invii in coda. */
@@ -89,6 +91,10 @@ async function registerWorkers(b: PgBoss) {
 
   await b.work<IdJob>(Q.afterConfirm, safe(async ([job]) => {
     await sendConfirmation(job!.data.deliveryId);
+  }));
+
+  await b.work<IdJob>(Q.askPin, safe(async ([job]) => {
+    await sendPinQuestion(job!.data.deliveryId);
   }));
 
   // Scade solo se la consegna è ancora nello stato in cui era quando il job è stato creato

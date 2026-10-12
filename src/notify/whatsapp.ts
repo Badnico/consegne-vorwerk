@@ -47,6 +47,19 @@ export function sendProposalTemplate(to: string, params: string[], yesPayload: s
   });
 }
 
+/** Messaggio con pulsanti di risposta rapida (max 3, titolo max 20 caratteri): ammesso entro 24 ore dall'ultimo messaggio del cliente. */
+export function sendButtons(to: string, body: string, buttons: { id: string; title: string }[]) {
+  return post({
+    to: toWaNumber(to),
+    type: 'interactive',
+    interactive: {
+      type: 'button',
+      body: { text: body },
+      action: { buttons: buttons.slice(0, 3).map((b) => ({ type: 'reply', reply: { id: b.id, title: b.title.slice(0, 20) } })) },
+    },
+  });
+}
+
 /** Testo libero: ammesso solo entro 24 ore dall'ultimo messaggio del cliente. */
 export function sendText(to: string, body: string) {
   return post({ to: toWaNumber(to), type: 'text', text: { body, preview_url: true } });

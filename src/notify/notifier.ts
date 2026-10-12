@@ -7,7 +7,21 @@ import { fillText, getMessages, type Messages } from '../domain/settings.js';
 import * as wa from './whatsapp.js';
 import { button, layout, para, sendEmail } from './email.js';
 
-type Kind = 'proposal' | 'reminder' | 'reschedule_link' | 'confirmation' | 'out_of_area';
+type Kind = 'proposal' | 'reminder' | 'reschedule_link' | 'confirmation' | 'out_of_area' | 'pin_question';
+
+export const formatEuro = (n: number) => n.toLocaleString('it-IT', { style: 'currency', currency: 'EUR' });
+
+/**
+ * Testo di conferma completo: il testo della scheda Messaggi + indirizzo di consegna (se il testo non lo contiene già)
+ * + contrassegno da pagare (se > 0) + ritiro del vecchio prodotto (se previsto).
+ */
+export function confirmationText(m: Messages, d: DeliveryView, base: keyof Messages, v: Record<string, string>) {
+  const parts = [fillText(m[base], v)];
+  if (!m[base].includes('{indirizzo}')) parts.push(fillText(m.extra_address, v));
+  if ((Number(d.cod_amount) || 0) > 0) parts.push(fillText(m.extra_cod, v));
+  if (d.pickup) parts.push(fillText(m.extra_pickup, v));
+  return parts.filter((p) => p.trim()).join('\n');
+}
 
 /** Valori dei campi {nome}, {data}, ... per una consegna. "proposed" usa lo slot proposto all'inizio. */
 export function messageVars(d: DeliveryView, which: 'proposed' | 'current', link = '') {
@@ -16,6 +30,7 @@ export function messageVars(d: DeliveryView, which: 'proposed' | 'current', link
   const end = which === 'proposed' ? d.proposed_end : d.end_time;
   return {
     azienda: d.tenant_name,
+    contrassegno: formatEuro(Number(d.cod_amount) || 0),
     nome: d.customer_name.split(' ')[0] ?? d.customer_name,
     prodotto: d.product ?? 'ordine',
     ordine: d.order_ref,
@@ -116,6 +131,7 @@ export async function sendOutOfArea(deliveryId: string) {
 
 export async function sendConfirmation(deliveryId: string) {
   const d = await getDelivery(pool, deliveryId);
+  if (d.status !== 'confirmed' && d.status !== 'rescheduled') return null; // es. in attesa della risposta sul PIN
   const m = await getMessages(pool, d.tenant_id);
   const url = await linkFor(d);
   const v = messageVars(d, 'current', url);
@@ -123,10 +139,29 @@ export async function sendConfirmation(deliveryId: string) {
   return deliver(
     d,
     'confirmation',
-    () => wa.sendText(d.phone_e164!, t(m, rescheduled ? 'wa_rescheduled' : 'wa_confirmed', v)),
+    () => wa.sendText(d.phone_e164!, confirmationText(m, d, rescheduled ? 'wa_rescheduled' : 'wa_confirmed', v)),
     () => {
-      const body = t(m, rescheduled ? 'mail_rescheduled' : 'mail_confirmed', v);
+      const body = confirmationText(m, d, rescheduled ? 'mail_rescheduled' : 'mail_confirmed', v);
       return sendEmail(sender(d), d.email!, t(m, 'mail_subject', v), `${body}\n\n${url}\n`, layout(para(body) + `<p><a href="${url}">Devi cambiarla?</a></p>`));
     },
+  );
+}
+
+/** Dopo il Sì: "Hai ricevuto il PIN?" con i pulsanti Sì/No. Su WhatsApp il cliente ha appena scritto: la finestra di 24 ore è aperta. */
+export async function sendPinQuestion(deliveryId: string) {
+  const d = await getDelivery(pool, deliveryId);
+  if (d.status !== 'pin_check') return null;
+  const m = await getMessages(pool, d.tenant_id);
+  const url = await linkFor(d);
+  const v = messageVars(d, 'current', url);
+  return deliver(
+    d,
+    'pin_question',
+    () => wa.sendButtons(d.phone_e164!, t(m, 'wa_pin_question', v), [
+      { id: `PINYES:${d.id}`, title: t(m, 'wa_pin_yes', v) },
+      { id: `PINNO:${d.id}`, title: t(m, 'wa_pin_no', v) },
+    ]),
+    () => sendEmail(sender(d), d.email!, t(m, 'mail_subject', v), `${t(m, 'wa_pin_question', v)}\n${url}\n`,
+      layout(`<p><strong>${t(m, 'wa_pin_question', v)}</strong></p><p>${button(url, 'Rispondi')}</p>`)),
   );
 }

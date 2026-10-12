@@ -3,6 +3,7 @@ import type { Db } from '../lib/db.js';
 import { config, emailEnabled } from '../config.js';
 import { formatDateIt, hhmm, todayLocal } from '../lib/dates.js';
 import { listDeliveries, type DeliveryView, type Status } from './deliveries.js';
+import { fieldOf } from './importer.js';
 import { getFeatures, getReportSetting, getReportState, saveReportState } from './settings.js';
 import { esc, layout, para, sendEmail } from '../notify/email.js';
 
@@ -17,6 +18,7 @@ export const RETENTION_HOURS = 48; // dopo 48 ore i report si cancellano da soli
 
 const STATUS_IT: Record<Status, string> = {
   proposed: 'Messaggio inviato, in attesa di risposta',
+  pin_check: 'Ha detto Sì, deve rispondere se ha ricevuto il PIN',
   confirmed: 'Confermata dal cliente',
   to_reschedule: 'Ha detto No, deve scegliere la nuova data',
   rescheduled: 'Nuova data scelta',
@@ -27,7 +29,7 @@ const STATUS_IT: Record<Status, string> = {
 };
 
 export function situationOf(d: DeliveryView, today = todayLocal()): Situation | null {
-  if (['proposed', 'to_reschedule', 'out_of_area', 'no_response'].includes(d.status)) return 'Da confermare';
+  if (['proposed', 'pin_check', 'to_reschedule', 'out_of_area', 'no_response'].includes(d.status)) return 'Da confermare';
   if (d.status === 'confirmed' || d.status === 'rescheduled') return d.slot_id && d.date && d.date <= today ? 'Da chiudere' : 'Confermata';
   return null;
 }
@@ -65,6 +67,16 @@ export async function buildReport(db: Db, tenantId: string, tenantName: string) 
   sum.addRow(['Da chiudere: consegne confermate di oggi o dei giorni passati che aspettano l\'esito (consegnata o non consegnata).']);
   sum.addRow(['Da confermare: il cliente non ha ancora risposto, deve scegliere la nuova data o va contattato.']);
 
+  // Se le consegne arrivano da un file Excel: stesse colonne del file, con "Situazione" come prima colonna
+  if (rows.some((r) => r.d.source?.length)) writeSourceSheet(ws, rows);
+  else writeStandardSheet(ws, rows);
+
+  const fileStamp = now.toLocaleString('sv-SE', { timeZone: config.TIMEZONE }).slice(0, 16).replace(' ', '_').replace(':', '');
+  const filename = `consegne_${fileStamp}.xlsx`;
+  return { buffer: Buffer.from(await wb.xlsx.writeBuffer()), filename, rows: rows.length, counts, stamp };
+}
+
+function writeStandardSheet(ws: ExcelJS.Worksheet, rows: { d: DeliveryView; s: Situation }[]) {
   ws.columns = [
     { header: 'Situazione', key: 'sit', width: 15 },
     { header: 'Dettaglio', key: 'st', width: 40 },
@@ -110,9 +122,46 @@ export async function buildReport(db: Db, tenantId: string, tenantName: string) 
   ws.getColumn('cap').numFmt = '@';
   if (rows.length) ws.autoFilter = { from: 'A1', to: { row: rows.length + 1, column: ws.columns.length } };
 
-  const fileStamp = now.toLocaleString('sv-SE', { timeZone: config.TIMEZONE }).slice(0, 16).replace(' ', '_').replace(':', '');
-  const filename = `consegne_${fileStamp}.xlsx`;
-  return { buffer: Buffer.from(await wb.xlsx.writeBuffer()), filename, rows: rows.length, counts, stamp };
+}
+
+/** Valore di una colonna del file per una consegna inserita a mano (senza riga originale). */
+function valueFor(d: DeliveryView, header: string): unknown {
+  switch (fieldOf(header)) {
+    case 'name': return d.customer_name;
+    case 'address': return d.address;
+    case 'city': return d.city ?? '';
+    case 'province': return d.province ?? '';
+    case 'cap': return d.cap ?? '';
+    case 'phone': return d.phone_e164 ?? '';
+    case 'email': return d.email ?? '';
+    case 'product': return d.product ?? '';
+    case 'order_ref': return d.order_ref;
+    case 'cod': return Number(d.cod_amount) || 0;
+    default: return null;
+  }
+}
+
+function writeSourceSheet(ws: ExcelJS.Worksheet, rows: { d: DeliveryView; s: Situation }[]) {
+  // colonne: tutte quelle dei fogli caricati, nell'ordine in cui compaiono
+  const headers: string[] = [];
+  for (const { d } of rows) for (const c of d.source ?? []) if (!headers.includes(c.h)) headers.push(c.h);
+  ws.columns = [{ header: 'Situazione', key: 'sit', width: 15 }, ...headers.map((h, i) => ({ header: h, key: `c${i}`, width: Math.min(Math.max(h.length + 2, 10), 34) }))];
+  const head = ws.getRow(1);
+  head.font = { bold: true };
+  head.alignment = { vertical: 'middle', wrapText: true };
+  for (const { d, s } of rows) {
+    const values: Record<string, unknown> = { sit: s };
+    headers.forEach((h, i) => {
+      const c = d.source?.find((x) => x.h === h);
+      let v: unknown = c ? c.v : d.source?.length ? null : valueFor(d, h);
+      if (v && typeof v === 'object' && 'd' in (v as object)) { const dt = new Date((v as { d: string }).d); v = isNaN(dt.getTime()) ? null : dt; }
+      values[`c${i}`] = v ?? null;
+    });
+    const r = ws.addRow(values);
+    r.getCell('sit').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: FILL[s] } };
+    r.eachCell((cell) => { if (cell.value instanceof Date) cell.numFmt = 'dd/mm/yyyy'; });
+  }
+  if (rows.length) ws.autoFilter = { from: 'A1', to: { row: rows.length + 1, column: headers.length + 1 } };
 }
 
 /** Genera, salva e (se impostato) manda per email il report di un ambiente. */

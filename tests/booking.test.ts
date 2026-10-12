@@ -10,7 +10,9 @@ import { fromAddress } from '../src/notify/email.js';
 import ExcelJS from 'exceljs';
 import { openSlots, parseWorkbook, planSlots } from '../src/domain/importer.js';
 import { createReport, deleteReport, purgeExpiredReports, dueAtTime, getReportFile, listReports, localHHMM, runDueReports, situationOf } from '../src/domain/report.js';
-import { saveReportSetting, saveReportState } from '../src/domain/settings.js';
+import { getMessages as getMsgs, noSendMatch, saveFlow, saveReportSetting, saveReportState } from '../src/domain/settings.js';
+import { answerPin, markNotSent } from '../src/domain/deliveries.js';
+import { confirmationText } from '../src/notify/notifier.js';
 import { createTenant, updateTenant } from '../src/domain/tenants.js';
 import { loginTenant } from '../src/lib/auth.js';
 import { addDays, todayLocal } from '../src/lib/dates.js';
@@ -40,6 +42,8 @@ before(async () => {
   T = await createTenant({ name: 'Uno', slug: 'uno', username: 'uno', password: 'password-lunga-1', email: 'uno@example.it', subscription_end: end });
   T2 = await createTenant({ name: 'Due', slug: 'due', username: 'due', password: 'password-lunga-2', email: 'due@example.it', subscription_end: end });
   await pool.query('DELETE FROM slots WHERE tenant_id = $1', [T]); // nei test gli slot li creiamo a mano
+  // la domanda sul PIN ha un test dedicato: negli altri il Sì conferma subito
+  await saveFlow(pool, T, { askPin: false }); await saveFlow(pool, T2, { askPin: false });
   day = (await bookingWindow(pool, T)).from;
 });
 after(() => pool.end());
@@ -326,4 +330,82 @@ test('i nuovi ambienti nascono con il report a orario fisso attivo', async () =>
   const id = await createTenant({ name: 'Nuovo', slug: 'nuovo-test', username: 'nuovo', password: 'password-nuovo-1', email: 'n@example.it', subscription_end: addDays(todayLocal(), 30) });
   const f = (await pool.query<{ features: Record<string, boolean> }>('SELECT features FROM tenants WHERE id = $1', [id])).rows[0]!.features;
   assert.equal(f.reportAtTime, true);
+});
+
+test('PIN: dopo il Sì chiede il PIN; Sì conferma (con indirizzo, contrassegno e ritiro), No passa all\'operatore', async () => {
+  await saveFlow(pool, T, { askPin: true });
+  const a = await slot('04:00', 3);
+  const mk = (extra = {}) => createDelivery(T, { order_ref: order(), customer, address: 'VIA GENOVA 59, ANDRANO (LE)', city: 'ANDRANO', province: 'LE', slot_id: a, product: 'FOLLETTO', ...extra }, 'test');
+  const id1 = await mk({ cod_amount: 300, pickup: true });
+  assert.equal(await confirmDelivery(id1, 'customer', T), 'pin_check');
+  assert.equal(await booked(a), 1); // il posto resta occupato mentre aspetta la risposta
+  assert.equal(await answerPin(id1, true, 'customer', T), 'confirmed');
+  const d1 = await getDelivery(pool, id1, T);
+  const txt = confirmationText(await getMsgs(pool, T), d1, 'wa_confirmed', messageVars(d1, 'current'));
+  assert.match(txt, /Indirizzo di consegna: VIA GENOVA 59, ANDRANO \(LE\)/);
+  assert.match(txt, /contrassegno da pagare di 300,00/);
+  assert.match(txt, /prodotto da ritirare/);
+  const id2 = await mk();
+  await confirmDelivery(id2, 'customer', T);
+  assert.equal(await answerPin(id2, false, 'customer', T), 'out_of_area');
+  assert.equal(await booked(a), 1); // il No libera il posto
+  const d2 = await getDelivery(pool, id2, T);
+  const txt2 = confirmationText(await getMsgs(pool, T), d2, 'wa_confirmed', messageVars(d2, 'current'));
+  assert.doesNotMatch(txt2, /contrassegno|ritirare/); // niente contrassegno né ritiro
+  await assert.rejects(answerPin(id2, true, 'customer', T), { code: 'invalid_state' });
+  await saveFlow(pool, T, { askPin: false });
+});
+
+test('esclusioni dal primo messaggio: CAP, località o provincia', async () => {
+  const list = '20121\n201*, ANDRANO; ta';
+  assert.equal(noSendMatch(list, { cap: '20121' }), '20121');
+  assert.equal(noSendMatch(list, { cap: '20155' }), '201*');
+  assert.equal(noSendMatch(list, { city: 'Andrano' }), 'ANDRANO');
+  assert.equal(noSendMatch(list, { province: 'TA' }), 'ta');
+  assert.equal(noSendMatch(list, { cap: '70121', city: 'BARI', province: 'BA' }), null);
+  assert.equal(noSendMatch('', { cap: '20121' }), null);
+  const a = await slot('05:00', 2);
+  const id = await createDelivery(T, { order_ref: order(), customer, address: 'Via X 1', slot_id: a }, 'test');
+  await markNotSent(id, 'ANDRANO', 'test');
+  assert.equal((await getDelivery(pool, id, T)).status, 'out_of_area');
+  assert.equal(await booked(a), 0);
+});
+
+test('Excel con più fogli e colonne del gestionale (Brand, contrassegno, priorità) e report con le stesse colonne', async () => {
+  const wb = new ExcelJS.Workbook();
+  const head = ['Tp Ordine', 'Brand', 'Sped Nr', 'DESTINATARIO MERCE', 'Arri Via', 'Arri Località', 'Arri Pr', 'Importo Contrassegno', 'Dest - Numero Telefono1', 'Dest - Numero Telefono2', 'Clie. Rif. Ordine', 'Priorita Evasione', 'Numero Colli', 'Ddt Data', 'NOTE'];
+  const z1 = wb.addWorksheet('BARI'); z1.addRow(head);
+  z1.addRow([1, 'FOLLETTO', 255143, 'LAZZARI EMANUELE', 'VIA GENOVA 59', 'ANDRANO', 'LE', 300, '340  8824181', null, 2661622441, 90, 7, new Date(Date.UTC(2026, 8, 2)), 'NR']);
+  const z2 = wb.addWorksheet('NORD'); z2.addRow([...head.slice(0, 14), 'AUTISTA']);
+  z2.addRow([1, 'BIMBY', 236790, 'CAPONE', 'Via Armengol 51', 'BRINDISI', 'BR', 0, null, 3296348330, 2691122172, 80, 3, new Date(Date.UTC(2026, 7, 7)), 'CALO']);
+  z2.addRow([1, 'FOLLETTO', 1, 'DOPPIONE', 'Via Y 2', 'BARI', 'BA', 0, '3331112222', null, 2661622441, 80, 1, null, '']); // stesso ordine del foglio BARI
+  wb.addWorksheet('Foglio2').addRow(['SEGNACOLLO', 'CLIENTE', 'CAP']); // foglio di altro tipo: ignorato
+  const { rows, errors } = await parseWorkbook(Buffer.from(await wb.xlsx.writeBuffer()));
+  assert.equal(errors.length, 0);
+  assert.equal(rows.length, 3);
+  const [r1, r2] = rows;
+  assert.equal(r1!.product, 'FOLLETTO'); assert.equal(r1!.cod_amount, 300); assert.equal(r1!.pickup, true);
+  assert.equal(r1!.order_ref, '2661622441'); assert.equal(r1!.phone, '+393408824181'); assert.equal(r1!.address, 'VIA GENOVA 59, ANDRANO (LE)');
+  assert.equal(r2!.product, 'BIMBY'); assert.equal(r2!.pickup, false); assert.equal(r2!.phone, '+393296348330'); // dal Telefono2
+  const plan = planSlots(rows, { first: '2030-01-01', slots: [{ id: 'x', date: '2030-01-01', start: '08:00', end: '11:00', free: 9 }] }, new Set());
+  assert.match(plan[2]!.errors.join(), /ripetuto nel file/);
+
+  // report: prima colonna Situazione, poi le colonne del file
+  await pool.query('DELETE FROM deliveries WHERE tenant_id = $1', [T2]);
+  const open = await openSlots(pool, T2);
+  const s0 = open.slots.find((s) => s.free > 0)!;
+  for (const r of rows.slice(0, 2)) {
+    await createDelivery(T2, { order_ref: r.order_ref, customer: { name: r.name, phone_e164: r.phone }, address: r.address, city: r.city, province: r.province, cod_amount: r.cod_amount, pickup: r.pickup, source: r.source, product: r.product, slot_id: s0.id }, 'test');
+  }
+  const rep = await createReport(pool, T2, 'manual');
+  const out = new ExcelJS.Workbook();
+  await out.xlsx.load((await getReportFile(pool, T2, rep.id))!.data as unknown as ArrayBuffer);
+  const ws = out.worksheets[0]!;
+  const hdr = (ws.getRow(1).values as unknown[]).slice(1);
+  assert.deepEqual(hdr, ['Situazione', ...head, 'AUTISTA']);
+  assert.equal(ws.getRow(2).getCell(1).value, 'Da confermare');
+  const brands = [ws.getRow(2).getCell(3).value, ws.getRow(3).getCell(3).value].sort();
+  assert.deepEqual(brands, ['BIMBY', 'FOLLETTO']);
+  const anyDate = [ws.getRow(2).getCell(15).value, ws.getRow(3).getCell(15).value].some((v) => v instanceof Date);
+  assert.ok(anyDate); // le date restano date
 });

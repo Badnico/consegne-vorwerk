@@ -6,7 +6,7 @@ import { addDays, hhmm, todayLocal } from '../lib/dates.js';
 import { DomainError } from '../lib/errors.js';
 import { actorOf, requireOperator, tenantOf } from '../lib/auth.js';
 import {
-  bookSlot, confirmDelivery, declineDelivery, createDelivery, deleteDelivery, deliveryEvents, getDelivery, listDeliveries,
+  answerPin, markNotSent, bookSlot, confirmDelivery, declineDelivery, createDelivery, deleteDelivery, deliveryEvents, getDelivery, listDeliveries,
   markDelivered, markFailedLetCustomerChoose, type DeliveryView, type Status,
 } from '../domain/deliveries.js';
 import { generateSlots, replaceTemplates } from '../domain/slots.js';
@@ -14,7 +14,7 @@ import {
   getArea, getBooking, getMessages, parseArea, saveArea, saveBooking, saveMessages, validateMessages, MESSAGE_DEFAULTS, type Messages,
 } from '../domain/settings.js';
 import { createToken, customerUrl } from '../domain/tokens.js';
-import { getFeatures, getReportSetting, saveReportSetting } from '../domain/settings.js';
+import { getFeatures, getFlow, getReportSetting, noSendMatch, saveFlow, saveReportSetting } from '../domain/settings.js';
 import { openSlots, parseWorkbook, personKey, planSlots, templateWorkbook, type ImportRow, type PlannedRow } from '../domain/importer.js';
 import { createReport, deleteReport, getReportFile, listReports } from '../domain/report.js';
 import { enqueue } from '../jobs/queue.js';
@@ -24,7 +24,7 @@ import { enqueue } from '../jobs/queue.js';
  * stati in italiano, fascia identificata da "HH:MM-HH:MM".
  */
 const IT: Record<Status, string> = {
-  proposed: 'inviato', confirmed: 'confermato', to_reschedule: 'da_riprogrammare', rescheduled: 'riprogrammato',
+  proposed: 'inviato', pin_check: 'attesa_pin', confirmed: 'confermato', to_reschedule: 'da_riprogrammare', rescheduled: 'riprogrammato',
   out_of_area: 'fuori_area', no_response: 'senza_risposta', cancelled: 'annullata', delivered: 'consegnata',
 };
 const bandId = (start: string | null, end: string | null) => (start && end ? `${hhmm(start)}-${hhmm(end)}` : null);
@@ -36,6 +36,10 @@ function toPanel(d: DeliveryView, log: { t: string; ev: string }[] = []) {
     name: d.customer_name,
     address: d.address,
     cap: d.cap ?? '',
+    city: d.city ?? '',
+    province: d.province ?? '',
+    cod: Number(d.cod_amount) || 0,
+    pickup: d.pickup,
     phone: d.phone_e164 ?? '',
     email: d.email ?? '',
     product: d.product ?? '',
@@ -113,6 +117,7 @@ export async function panelRoutes(app: FastifyInstance) {
       schedule: await getSchedule(t),
       area: await getArea(pool, t),
       messages: await getMessages(pool, t),
+      flow: await getFlow(pool, t),
       deliveries: list.map((d) => toPanel(d, logs.get(d.id))),
     };
   });
@@ -138,7 +143,9 @@ export async function panelRoutes(app: FastifyInstance) {
       address: b.address, cap: b.cap, product: b.product || null,
       slot_id: await slotIdFor(t, b.date, b.bandId),
     }, actorOf(req));
-    await enqueue.proposal(id);
+    const excluded = noSendMatch((await getArea(pool, t)).noSend, { cap: b.cap });
+    if (excluded) await markNotSent(id, excluded, actorOf(req));
+    else await enqueue.proposal(id);
     return reply.code(201).send(toPanel(await getDelivery(pool, id)));
   });
 
@@ -169,10 +176,12 @@ export async function panelRoutes(app: FastifyInstance) {
   /** Sì / No dato dall'anteprima al posto del cliente: stessi effetti e messaggi della risposta vera. */
   app.post('/deliveries/:id/answer', async (req) => {
     const { id } = idParam.parse(req.params);
-    const { answer } = z.object({ answer: z.enum(['yes', 'no']) }).parse(req.body);
+    const { answer } = z.object({ answer: z.enum(['yes', 'no', 'pin_yes', 'pin_no']) }).parse(req.body);
     const t = tenantOf(req), actor = `customer:pannello (${actorOf(req)})`;
-    if (answer === 'yes') { await confirmDelivery(id, actor, t); await enqueue.afterConfirm(id); }
-    else { await declineDelivery(id, actor, t); await enqueue.afterDecline(id); }
+    if (answer === 'yes') { if ((await confirmDelivery(id, actor, t)) === 'confirmed') await enqueue.afterConfirm(id); } // con il PIN: la domanda si risponde nell'anteprima
+    else if (answer === 'no') { await declineDelivery(id, actor, t); await enqueue.afterDecline(id); }
+    else if ((await answerPin(id, answer === 'pin_yes', actor, t)) === 'confirmed') await enqueue.afterConfirm(id);
+    else await enqueue.afterDecline(id);
     return toPanel(await getDelivery(pool, id));
   });
 
@@ -244,7 +253,11 @@ export async function panelRoutes(app: FastifyInstance) {
     if (parsed.missing.length) throw new DomainError('missing_columns', `Nel file mancano le colonne: ${parsed.missing.join(', ')}. Scarica il modello per vedere come deve essere.`, 422);
     const open = await openSlots(pool, t);
     const planned = planSlots(parsed.rows, open, await existingRefs(t), await openPeople(t));
-    const rows: PlannedRow[] = [...planned, ...parsed.errors].sort((a, b2) => a.line - b2.line);
+    const noSend = (await getArea(pool, t)).noSend;
+    const sheets = [...new Set([...planned, ...parsed.errors].map((r) => r.sheet))];
+    const rows = [...planned, ...parsed.errors]
+      .sort((a, b2) => sheets.indexOf(a.sheet) - sheets.indexOf(b2.sheet) || a.line - b2.line)
+      .map((r) => ({ ...r, noSend: noSendMatch(noSend, r) }));
     if (!rows.length) throw new DomainError('empty_file', 'Il file non contiene consegne: sotto le intestazioni non ci sono righe compilate.', 422);
     // fasce disponibili, per scegliere data e fascia riga per riga prima dell'invio
     const slots = open.slots.map((s) => ({ date: s.date, bandId: `${s.start}-${s.end}`, free: s.free }));
@@ -252,37 +265,44 @@ export async function panelRoutes(app: FastifyInstance) {
   });
 
   /** Crea le consegne valide e invia a tutti il messaggio. Le fasce vengono ricontrollate al momento. */
-  app.post('/import/commit', async (req) => {
+  app.post('/import/commit', { bodyLimit: 15 * 1024 * 1024 }, async (req) => {
     const row = z.object({
-      line: z.number().int(), name: z.string().trim().min(1).max(200), address: z.string().trim().min(3).max(300),
-      cap: z.string().regex(/^\d{5}$/), phone: z.string().regex(/^(\+\d{8,15})?$/), email: z.string().max(200),
+      line: z.number().int(), sheet: z.string().max(100).default(''), name: z.string().trim().min(1).max(200), address: z.string().trim().min(3).max(300),
+      cap: z.string().regex(/^(\d{5})?$/), phone: z.string().regex(/^(\+\d{8,15})?$/), email: z.string().max(200),
       product: z.string().max(120), order_ref: z.string().max(60),
+      city: z.string().max(120).default(''), province: z.string().max(4).default(''),
+      cod_amount: z.number().min(0).max(1_000_000).default(0), pickup: z.boolean().default(false),
+      source: z.array(z.object({ h: z.string().max(200), v: z.unknown() })).max(200).default([]),
       date: isoDate.nullable(), band: time.nullable(),
     }).refine((r) => r.phone || r.email, 'Serve almeno un contatto');
     const b = z.object({ rows: z.array(row).min(1).max(1000) }).parse(req.body);
     const t = tenantOf(req), actor = `${actorOf(req)} (Excel)`;
     const refs = await existingRefs(t), people = await openPeople(t);
-    const results: { line: number; ok: boolean; error?: string; name: string; slot?: { date: string; bandId: string } }[] = [];
+    const noSend = (await getArea(pool, t)).noSend;
+    const results: { line: number; sheet: string; ok: boolean; error?: string; name: string; notSent?: boolean; slot?: { date: string; bandId: string } }[] = [];
     for (const r of b.rows as ImportRow[]) {
       // ricalcola lo slot con i posti di adesso (nel frattempo altri potrebbero averli presi)
       const [plan] = planSlots([r], await openSlots(pool, t), refs, people);
-      if (!plan || plan.errors.length || !plan.slot) { results.push({ line: r.line, ok: false, name: r.name, error: [...(plan?.errors ?? []), plan?.slotIssue].filter(Boolean).join('; ') || 'non inviata' }); continue; }
+      if (!plan || plan.errors.length || !plan.slot) { results.push({ line: r.line, sheet: r.sheet, ok: false, name: r.name, error: [...(plan?.errors ?? []), plan?.slotIssue].filter(Boolean).join('; ') || 'non inviata' }); continue; }
       try {
         const ref = r.order_ref || await newOrderRef(t, refs);
         const id = await createDelivery(t, {
           order_ref: ref,
           customer: { name: r.name, phone_e164: r.phone || null, email: r.email || null, consent_whatsapp: Boolean(r.phone) },
-          address: r.address, cap: r.cap, product: r.product || null,
+          address: r.address, cap: r.cap || null, product: r.product || null,
+          city: r.city || null, province: r.province || null, cod_amount: r.cod_amount, pickup: r.pickup, source: r.source,
           slot_id: await slotIdFor(t, plan.slot.date, plan.slot.bandId),
         }, actor);
         refs.add(ref.toLowerCase()); people.add(personKey(r.name, r.address));
-        await enqueue.proposal(id);
-        results.push({ line: r.line, ok: true, name: r.name, slot: plan.slot });
+        const excluded = noSendMatch(noSend, r);
+        if (excluded) await markNotSent(id, excluded, actor);
+        else await enqueue.proposal(id);
+        results.push({ line: r.line, sheet: r.sheet, ok: true, name: r.name, slot: plan.slot, notSent: Boolean(excluded) });
       } catch (err) {
-        results.push({ line: r.line, ok: false, name: r.name, error: err instanceof DomainError ? err.message : 'errore imprevisto' });
+        results.push({ line: r.line, sheet: r.sheet, ok: false, name: r.name, error: err instanceof DomainError ? err.message : 'errore imprevisto' });
       }
     }
-    return { sent: results.filter((x) => x.ok).length, results };
+    return { sent: results.filter((x) => x.ok && !x.notSent).length, notSent: results.filter((x) => x.notSent).length, results };
   });
 
   /* ---------- report Excel periodico ---------- */
@@ -322,8 +342,14 @@ export async function panelRoutes(app: FastifyInstance) {
     return reply.header('content-type', XLSX).header('content-disposition', attachment(f.filename)).send(f.data);
   });
 
+  app.put('/flow', async (req) => {
+    const b = z.object({ askPin: z.boolean() }).parse(req.body);
+    await saveFlow(pool, tenantOf(req), b);
+    return b;
+  });
+
   app.put('/area', async (req) => {
-    const b = z.object({ on: z.boolean(), list: z.string().max(20000), callAll: z.boolean().optional().default(false) }).parse(req.body);
+    const b = z.object({ on: z.boolean(), list: z.string().max(20000), callAll: z.boolean().optional().default(false), noSend: z.string().max(20000).optional().default('') }).parse(req.body);
     const { bad } = parseArea(b.list);
     if (bad.length) throw new DomainError('invalid_area', `Non riconosciuto: ${bad.slice(0, 3).join(', ')}.`, 422);
     await saveArea(pool, tenantOf(req), b);
