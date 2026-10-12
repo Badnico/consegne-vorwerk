@@ -5,6 +5,7 @@ import { DomainError } from '../lib/errors.js';
 import { answerPin, confirmDelivery, declineDelivery } from '../domain/deliveries.js';
 import { verifySignature, type WaWebhook } from '../notify/whatsapp.js';
 import { enqueue } from '../jobs/queue.js';
+import { tenantsByPhoneNumberId } from '../domain/settings.js';
 
 /** Registra un messaggio in entrata; false se già visto (Meta può consegnare lo stesso evento più volte). */
 async function recordInbound(deliveryId: string | null, providerId: string, payload: unknown) {
@@ -56,8 +57,12 @@ export async function webhookRoutes(app: FastifyInstance) {
 
   app.post('/webhooks/whatsapp', async (req, reply) => {
     const raw = req.body as Buffer;
-    if (!verifySignature(raw, req.headers['x-hub-signature-256'] as string | undefined)) return reply.code(401).send();
-    const body = JSON.parse(raw.toString('utf8')) as WaWebhook;
+    let body: WaWebhook;
+    try { body = JSON.parse(raw.toString('utf8')) as WaWebhook; } catch { return reply.code(400).send(); }
+    // firma: con la chiave generale o, se il numero è di un cliente su un altro account Meta, con la sua
+    const phoneId = body.entry?.[0]?.changes?.[0]?.value?.metadata?.phone_number_id;
+    const secrets = [config.WHATSAPP_APP_SECRET, ...(phoneId ? (await tenantsByPhoneNumberId(pool, phoneId)).map((r) => r.value.appSecret) : [])];
+    if (!verifySignature(raw, req.headers['x-hub-signature-256'] as string | undefined, secrets)) return reply.code(401).send();
 
     for (const entry of body.entry ?? []) {
       for (const change of entry.changes ?? []) {

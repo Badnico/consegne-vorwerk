@@ -178,3 +178,19 @@ export const saveReportState = async (db: Db, t: string, patch: ReportState) => 
 export interface FlowSetting { askPin: boolean }
 export const getFlow = (db: Db, t: string) => get<FlowSetting>(db, t, 'flow', { askPin: true });
 export const saveFlow = (db: Db, t: string, f: FlowSetting) => put(db, t, 'flow', f);
+
+/**
+ * Numero WhatsApp del cliente (facoltativo). Vuoto = i messaggi partono dal numero generale impostato su Render.
+ * token e appSecret servono solo se il numero è su un account Meta diverso dal tuo.
+ */
+export interface WaSetting { phoneNumberId: string; token: string; appSecret: string; template: string; lang: string }
+export const WA_DEFAULT: WaSetting = { phoneNumberId: '', token: '', appSecret: '', template: '', lang: '' };
+export const getWaSetting = (db: Db, t: string) => get<WaSetting>(db, t, 'whatsapp', { ...WA_DEFAULT });
+export const saveWaSetting = (db: Db, t: string, w: WaSetting) => put(db, t, 'whatsapp', w);
+/** Ambienti che hanno impostato questo numero (per il webhook). */
+export async function tenantsByPhoneNumberId(db: Db, phoneNumberId: string) {
+  const r = await db.query<{ tenant_id: string; value: WaSetting }>(
+    "SELECT tenant_id, value FROM settings WHERE key = 'whatsapp' AND value->>'phoneNumberId' = $1", [phoneNumberId]);
+  return r.rows;
+}
+

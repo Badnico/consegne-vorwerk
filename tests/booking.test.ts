@@ -435,3 +435,26 @@ test('elimina tutte: cancella ogni consegna dell\'ambiente e libera i posti, sen
   assert.equal(await booked(a), 0);
   assert.ok(((await pool.query('SELECT 1 FROM deliveries WHERE tenant_id = $1', [T2])).rowCount ?? 0) > 0);
 });
+
+test('WhatsApp del cliente: i messaggi partono dal suo numero con il suo token; senza dati nessun WhatsApp', async () => {
+  const { saveWaSetting } = await import('../src/domain/settings.js');
+  const { waConfigFor } = await import('../src/notify/notifier.js');
+  const wa = await import('../src/notify/whatsapp.js');
+  await saveWaSetting(pool, T, { phoneNumberId: '', token: '', appSecret: '', template: '', lang: '' });
+  assert.equal(await waConfigFor(T), null); // niente numero generale nei test e nessun numero del cliente
+  await saveWaSetting(pool, T, { phoneNumberId: '111222333444', token: 'tok-cliente', appSecret: 'sec-cliente', template: '', lang: '' });
+  const cfg = (await waConfigFor(T))!;
+  assert.deepEqual(cfg, { phoneNumberId: '111222333444', token: 'tok-cliente', template: 'consegna_proposta', lang: 'it' });
+  const orig = globalThis.fetch; let seen: { url: string; auth: string } | null = null;
+  globalThis.fetch = (async (url: string, init: RequestInit) => { seen = { url, auth: String((init.headers as Record<string, string>).Authorization) }; return new Response(JSON.stringify({ messages: [{ id: 'wamid.1' }] })); }) as typeof fetch;
+  try { await wa.sendText(cfg, '+393331112222', 'ciao'); } finally { globalThis.fetch = orig; }
+  assert.match(seen!.url, /\/111222333444\/messages$/);
+  assert.equal(seen!.auth, 'Bearer tok-cliente');
+  // firma del webhook con la chiave del cliente
+  const { createHmac } = await import('node:crypto');
+  const raw = Buffer.from('{"x":1}');
+  const sig = 'sha256=' + createHmac('sha256', 'sec-cliente').update(raw).digest('hex');
+  assert.equal(wa.verifySignature(raw, sig, ['', 'sec-cliente']), true);
+  assert.equal(wa.verifySignature(raw, sig, ['altra']), false);
+  await saveWaSetting(pool, T, { phoneNumberId: '', token: '', appSecret: '', template: '', lang: '' });
+});

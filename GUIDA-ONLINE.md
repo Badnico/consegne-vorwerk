@@ -101,6 +101,13 @@ Poi su Meta registra il webhook `https://<tuo-indirizzo>/webhooks/whatsapp`. Il 
 
 WhatsApp ed email sono unici per tutto il sistema: i messaggi di tutti gli ambienti partono dallo stesso numero e dallo stesso indirizzo, e ogni messaggio dice per conto di quale azienda arriva. Nelle email il mittente appare con il nome dell'azienda (es. "Rossi Elettrodomestici") e se il destinatario risponde, la risposta va all'email dell'azienda.
 
+### Un cliente con il suo numero WhatsApp
+
+Nel pannello amministratore, **Modifica** del cliente → **WhatsApp del cliente**: inserisci l'**ID del numero di telefono** del cliente e premi **Salva**. Da quel momento i messaggi di quel cliente partono dal suo numero; gli altri continuano a usare il numero generale. Con **Invia messaggio di prova** controlli subito che funzioni.
+- Se il numero del cliente è stato aggiunto al **tuo** account WhatsApp su Meta: basta l'ID (token, chiave segreta, modello e webhook sono già quelli tuoi).
+- Se il numero è sull'account Meta **del cliente**: servono anche il suo token e la sua chiave segreta (App secret), il modello `consegna_proposta` approvato sul suo account e, nella sua app Meta, il webhook `https://<indirizzo>/webhooks/whatsapp` con il tuo verify token e il campo **messages**.
+- Il numero non può restare nell'app WhatsApp Business del telefono: prima di collegarlo va eliminato l'account dall'app.
+
 ### Il modello WhatsApp da far approvare a Meta
 
 Il primo messaggio (quello con i pulsanti Sì e No) deve essere un modello approvato da Meta. Si crea una volta sola e vale per tutte le aziende.

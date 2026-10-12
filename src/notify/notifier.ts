@@ -1,9 +1,9 @@
 import { pool } from '../lib/db.js';
-import { emailEnabled, whatsappEnabled } from '../config.js';
+import { emailEnabled } from '../config.js';
 import { formatDateIt, hhmm, todayLocal } from '../lib/dates.js';
 import { getDelivery, type DeliveryView } from '../domain/deliveries.js';
 import { createToken, customerUrl } from '../domain/tokens.js';
-import { fillText, getMessages, type Messages } from '../domain/settings.js';
+import { fillText, getMessages, getWaSetting, type Messages } from '../domain/settings.js';
 import * as wa from './whatsapp.js';
 import { button, layout, para, sendEmail } from './email.js';
 
@@ -50,14 +50,26 @@ async function record(deliveryId: string, channel: 'whatsapp' | 'email', kind: K
   );
 }
 
-const canWhatsApp = (d: DeliveryView) => whatsappEnabled() && Boolean(d.phone_e164) && d.consent_whatsapp;
+/** Numero WhatsApp da usare per un ambiente: il suo se impostato, altrimenti quello generale. */
+export async function waConfigFor(tenantId: string): Promise<wa.WaConfig | null> {
+  const g = wa.globalWaConfig();
+  const t = await getWaSetting(pool, tenantId);
+  if (t.phoneNumberId) {
+    const token = t.token || g?.token;
+    if (!token) return null;
+    return { phoneNumberId: t.phoneNumberId, token, template: t.template || g?.template || 'consegna_proposta', lang: t.lang || g?.lang || 'it' };
+  }
+  return g;
+}
+
 const canEmail = (d: DeliveryView) => emailEnabled() && Boolean(d.email);
 
 /** Prova WhatsApp, poi email. Lancia se nessun canale riesce, così la coda ritenta. */
-async function deliver(d: DeliveryView, kind: Kind, viaWa: (() => Promise<string>) | null, viaMail: () => Promise<string>) {
-  if (viaWa && canWhatsApp(d)) {
+async function deliver(d: DeliveryView, kind: Kind, viaWa: ((c: wa.WaConfig) => Promise<string>) | null, viaMail: () => Promise<string>) {
+  const cfg = viaWa && d.phone_e164 && d.consent_whatsapp ? await waConfigFor(d.tenant_id) : null;
+  if (viaWa && cfg) {
     try {
-      await record(d.id, 'whatsapp', kind, await viaWa(), 'sent');
+      await record(d.id, 'whatsapp', kind, await viaWa(cfg), 'sent');
       return 'whatsapp' as const;
     } catch (err) {
       await record(d.id, 'whatsapp', kind, null, 'failed', { error: String(err) });
@@ -86,7 +98,7 @@ export async function sendProposal(deliveryId: string, kind: 'proposal' | 'remin
   return deliver(
     d,
     kind,
-    () => wa.sendProposalTemplate(d.phone_e164!, [v.nome, v.azienda, v.prodotto, v.ordine, v.data, `${v.inizio} e le ${v.fine}`], `YES:${d.id}`, `NO:${d.id}`),
+    (c) => wa.sendProposalTemplate(c, d.phone_e164!, [v.nome, v.azienda, v.prodotto, v.ordine, v.data, `${v.inizio} e le ${v.fine}`], `YES:${d.id}`, `NO:${d.id}`),
     () => {
       const subject = t(m, 'mail_subject', v);
       const text = `${t(m, 'mail_body', v)}\n\nConsegna proposta: ${v.data}, ${v.fascia}\n\n${t(m, 'mail_question', v)}\n${url}\n`;
@@ -110,7 +122,7 @@ export async function sendRescheduleLink(deliveryId: string) {
   return deliver(
     d,
     'reschedule_link',
-    () => wa.sendText(d.phone_e164!, t(m, 'wa_declined', v)),
+    (c) => wa.sendText(c, d.phone_e164!, t(m, 'wa_declined', v)),
     () => sendEmail(sender(d), d.email!, t(m, 'mail_subject', v), `${t(m, 'mail_reschedule', v)}\n${url}\n`,
       layout(`<p><strong>${t(m, 'mail_reschedule', v)}</strong></p><p>${button(url, t(m, 'mail_reschedule', v))}</p>`)),
   );
@@ -124,7 +136,7 @@ export async function sendOutOfArea(deliveryId: string) {
   return deliver(
     d,
     'out_of_area',
-    () => wa.sendText(d.phone_e164!, t(m, 'wa_out_area', v)),
+    (c) => wa.sendText(c, d.phone_e164!, t(m, 'wa_out_area', v)),
     () => sendEmail(sender(d), d.email!, t(m, 'mail_subject', v), t(m, 'mail_out_area', v), layout(para(t(m, 'mail_out_area', v)))),
   );
 }
@@ -139,7 +151,7 @@ export async function sendConfirmation(deliveryId: string) {
   return deliver(
     d,
     'confirmation',
-    () => wa.sendText(d.phone_e164!, confirmationText(m, d, rescheduled ? 'wa_rescheduled' : 'wa_confirmed', v)),
+    (c) => wa.sendText(c, d.phone_e164!, confirmationText(m, d, rescheduled ? 'wa_rescheduled' : 'wa_confirmed', v)),
     () => {
       const body = confirmationText(m, d, rescheduled ? 'mail_rescheduled' : 'mail_confirmed', v);
       return sendEmail(sender(d), d.email!, t(m, 'mail_subject', v), `${body}\n\n${url}\n`, layout(para(body) + `<p><a href="${url}">Devi cambiarla?</a></p>`));
@@ -157,7 +169,7 @@ export async function sendPinQuestion(deliveryId: string) {
   return deliver(
     d,
     'pin_question',
-    () => wa.sendButtons(d.phone_e164!, t(m, 'wa_pin_question', v), [
+    (c) => wa.sendButtons(c, d.phone_e164!, t(m, 'wa_pin_question', v), [
       { id: `PINYES:${d.id}`, title: t(m, 'wa_pin_yes', v) },
       { id: `PINNO:${d.id}`, title: t(m, 'wa_pin_no', v) },
     ]),

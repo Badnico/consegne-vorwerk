@@ -61,6 +61,9 @@ td a:hover{text-decoration:underline}
 .empty b{display:block;color:var(--fg);font-size:16px;margin-bottom:4px}
 dialog{border:1px solid var(--line);border-radius:14px;padding:0;background:var(--surface);color:var(--fg);width:min(560px,calc(100% - 32px));max-height:calc(100dvh - 32px)}
 fieldset.extras{border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin:0}
+fieldset.extras.wa{display:grid;gap:8px}
+fieldset.extras .hint{margin:0;font-size:12px;color:var(--muted)}
+.wachip{display:inline-block;margin-left:6px;font-size:11px;font-weight:600;padding:0 6px;border-radius:4px;background:var(--green-soft,#dcefe4);color:var(--green,#0b7a4b)}
 fieldset.extras legend{font-weight:600;font-size:13px;padding:0 4px}
 fieldset.extras small{color:var(--muted)}
 dialog::backdrop{background:rgba(10,20,15,.45)}
@@ -159,6 +162,17 @@ label.f small{font-weight:400}
         <small>I rinnovi si sommano dalla scadenza attuale, o da oggi se è già passata.</small></label>
     </div>
     <div class="row"><label class="row" style="gap:8px;font-weight:600"><input type="checkbox" id="eSusp"> Sospendi l'accesso (indipendentemente dalla scadenza)</label></div>
+    <fieldset class="extras wa"><legend>WhatsApp del cliente</legend>
+      <p class="hint">Lascia vuoto per mandare i messaggi dal <b>numero generale</b>. Se il cliente ha un numero suo collegato a Meta, inserisci qui i dati: i messaggi di questo cliente partiranno da quel numero.</p>
+      <div class="fields">
+        <label class="f">ID del numero di telefono<input id="eWaId" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="es. 123456789012345"><small>Meta → la tua app → WhatsApp → Configurazione API</small></label>
+        <label class="f">Nome del modello<input id="eWaTpl" autocomplete="off" spellcheck="false" placeholder="consegna_proposta"><small>Vuoto = consegna_proposta</small></label>
+        <label class="f full">Token di accesso<input id="eWaTok" type="password" autocomplete="new-password" spellcheck="false"><small id="eWaTokHint">Solo se il numero è su un account Meta diverso dal tuo</small></label>
+        <label class="f full">Chiave segreta dell'app (App secret)<input id="eWaSec" type="password" autocomplete="new-password" spellcheck="false"><small id="eWaSecHint">Solo se il numero è su un account Meta diverso dal tuo</small></label>
+      </div>
+      <div class="inline"><input id="eWaTest" class="search" style="flex:1" inputmode="tel" placeholder="Il tuo cellulare per la prova" aria-label="Numero per la prova"><button class="btn" type="button" id="eWaTestGo">Invia messaggio di prova</button></div>
+      <p class="hint" id="eWaMsg"></p>
+    </fieldset>
     <fieldset class="extras"><legend>Funzioni extra</legend>
       <label class="row" style="gap:8px"><input type="checkbox" id="eFAt"> Report Excel a orario fisso <small>(il cliente sceglie a che ora riceverlo ogni giorno)</small></label>
     </fieldset>
@@ -216,7 +230,7 @@ function render(){
   $('rows').innerHTML = list.map((t) => {
     const st = state(t), url = `${data.base}/${t.slug}/`;
     return `<tr>
-      <td><b>${esc(t.name)}</b><a href="${esc(url)}" target="_blank" rel="noopener">${esc(url.replace(/^https?:\/\//,''))}</a></td>
+      <td><b>${esc(t.name)}</b>${t.whatsapp && t.whatsapp.phoneNumberId ? '<span class="wachip">WhatsApp proprio</span>' : ''}<a href="${esc(url)}" target="_blank" rel="noopener">${esc(url.replace(/^https?:\/\//,''))}</a></td>
       <td class="mono">${t.username ? esc(t.username) : '<span class="pill st-soon"><i class="dot"></i>Da creare</span>'}</td>
       <td>${esc(t.email)}</td>
       <td><span class="pill st-${st.k}"><i class="dot"></i>${st.label}</span><small>fino al ${fmt(t.subscription_end)}</small></td>
@@ -287,9 +301,22 @@ function openEdit(id){
   $('eName').value = t.name; $('eUser').value = t.username || ''; $('ePass').value = '';
   $('ePass').placeholder = t.username ? 'Lascia vuoto per non cambiarla' : 'Obbligatoria per creare l\'utente';
   $('eMail').value = t.email; $('eEnd').value = t.subscription_end; $('eSusp').checked = t.suspended; $('eFAt').checked = !!(t.features || {}).reportAtTime;
+  const w = t.whatsapp || {};
+  $('eWaId').value = w.phoneNumberId || ''; $('eWaTpl').value = w.template || ''; $('eWaTok').value = ''; $('eWaSec').value = ''; $('eWaTest').value = ''; $('eWaMsg').textContent = '';
+  $('eWaTok').placeholder = w.hasToken ? 'Salvato ✓ — lascia vuoto per non cambiarlo' : 'Vuoto = usa il tuo token generale';
+  $('eWaSec').placeholder = w.hasSecret ? 'Salvata ✓ — lascia vuoto per non cambiarla' : 'Vuoto = usa la tua chiave generale';
   $('eSlugTxt').textContent = t.slug; $('eDel').value = ''; $('eDelGo').disabled = true;
   $('dEdit').showModal();
 }
+$('eWaTestGo').addEventListener('click', async () => {
+  const t = editing, msg = $('eWaMsg'), w = t.whatsapp || {};
+  if ($('eWaId').value.trim() !== (w.phoneNumberId || '') || $('eWaTok').value || $('eWaSec').value){ msg.textContent = 'Prima premi Salva: la prova usa i dati salvati.'; return; }
+  const to = $('eWaTest').value.trim(); if (!to){ msg.textContent = 'Scrivi il numero a cui mandare la prova.'; return; }
+  const btn = $('eWaTestGo'); btn.disabled = true; msg.textContent = 'Invio in corso…';
+  try { const r = await api(`/tenants/${t.id}/whatsapp-test`, { body:{ to } }); msg.textContent = `Messaggio di prova inviato dal numero ${r.from === 'cliente' ? 'del cliente' : 'generale'}: controlla WhatsApp.`; }
+  catch (ex) { msg.textContent = ex.message; }
+  btn.disabled = false;
+});
 $('eDel').addEventListener('input', () => { $('eDelGo').disabled = $('eDel').value.trim() !== editing?.slug; });
 $('fEdit').addEventListener('submit', async (e) => {
   e.preventDefault(); showErr('eErr', '');
@@ -301,6 +328,13 @@ $('fEdit').addEventListener('submit', async (e) => {
   if ($('eEnd').value !== t.subscription_end) b.subscription_end = $('eEnd').value;
   if ($('eSusp').checked !== t.suspended) b.suspended = $('eSusp').checked;
   if ($('eFAt').checked !== !!(t.features || {}).reportAtTime) b.features = { reportAtTime: $('eFAt').checked };
+  const w = t.whatsapp || {}, waId = $('eWaId').value.trim(), waTpl = $('eWaTpl').value.trim();
+  const waChanged = waId !== (w.phoneNumberId || '') || waTpl !== (w.template || '') || $('eWaTok').value || $('eWaSec').value;
+  if (waChanged){
+    try { await api(`/tenants/${t.id}/whatsapp`, { method:'PUT', body:{ phoneNumberId: waId, template: waTpl, token: $('eWaTok').value.trim(), appSecret: $('eWaSec').value.trim() } }); }
+    catch (ex) { showErr('eErr', ex.message); return; }
+    if (!Object.keys(b).length){ $('dEdit').close(); toast(waId ? 'WhatsApp del cliente salvato' : 'Il cliente usa il numero generale'); await load(); return; }
+  }
   if (!Object.keys(b).length){ $('dEdit').close(); return; }
   $('eGo').disabled = true;
   try {

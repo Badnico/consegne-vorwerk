@@ -4,6 +4,11 @@ import { requireSuperadmin } from '../lib/auth.js';
 import { accessState, createTenant, deleteTenant, listTenants, slugify, updateTenant } from '../domain/tenants.js';
 import { DomainError } from '../lib/errors.js';
 import { config } from '../config.js';
+import { pool } from '../lib/db.js';
+import { getWaSetting, saveWaSetting } from '../domain/settings.js';
+import { waConfigFor } from '../notify/notifier.js';
+import * as wa from '../notify/whatsapp.js';
+import { normalizePhone } from '../domain/importer.js';
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Data non valida');
 
@@ -14,10 +19,54 @@ export async function superadminRoutes(app: FastifyInstance) {
     return requireSuperadmin(req, reply);
   });
 
-  app.get('/tenants', async () => ({
-    base: config.PUBLIC_BASE_URL,
-    tenants: (await listTenants()).map((t) => ({ ...t, state: accessState(t) })),
-  }));
+  app.get('/tenants', async () => {
+    const tenants = await listTenants();
+    return {
+      base: config.PUBLIC_BASE_URL,
+      globalWhatsapp: Boolean(wa.globalWaConfig()),
+      tenants: await Promise.all(tenants.map(async (t) => {
+        const w = await getWaSetting(pool, t.id);
+        // le chiavi non tornano mai al browser: solo se sono impostate
+        return { ...t, state: accessState(t), whatsapp: { phoneNumberId: w.phoneNumberId, template: w.template, lang: w.lang, hasToken: Boolean(w.token), hasSecret: Boolean(w.appSecret) } };
+      })),
+    };
+  });
+
+  /** Numero WhatsApp del cliente. token/appSecret vuoti = lascia quelli salvati; clear = torna al numero generale. */
+  app.put('/tenants/:id/whatsapp', async (req) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const b = z.object({
+      phoneNumberId: z.string().trim().regex(/^(\d{6,20})?$/, "L'ID del numero è fatto solo di cifre (lo trovi su Meta in WhatsApp → Configurazione API)"),
+      token: z.string().trim().max(1000).optional().default(''),
+      appSecret: z.string().trim().max(200).optional().default(''),
+      template: z.string().trim().regex(/^[a-z0-9_]*$/, 'Il nome del modello ha solo lettere minuscole, numeri e _').max(100).optional().default(''),
+      lang: z.string().trim().max(10).optional().default(''),
+      clear: z.boolean().optional().default(false),
+    }).parse(req.body);
+    const cur = await getWaSetting(pool, id);
+    const next = b.clear || !b.phoneNumberId
+      ? { phoneNumberId: '', token: '', appSecret: '', template: '', lang: '' }
+      : { phoneNumberId: b.phoneNumberId, token: b.token || cur.token, appSecret: b.appSecret || cur.appSecret, template: b.template, lang: b.lang };
+    await saveWaSetting(pool, id, next);
+    return { ok: true, phoneNumberId: next.phoneNumberId, hasToken: Boolean(next.token), hasSecret: Boolean(next.appSecret) };
+  });
+
+  /** Manda il modello di proposta a un numero di prova con il WhatsApp di questo cliente. */
+  app.post('/tenants/:id/whatsapp-test', async (req) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const { to } = z.object({ to: z.string().trim().min(6) }).parse(req.body);
+    const phone = normalizePhone(to);
+    if (!phone || phone === 'invalid') throw new DomainError('invalid_phone', 'Numero non valido.', 422);
+    const cfg = await waConfigFor(id);
+    if (!cfg) throw new DomainError('wa_missing', 'WhatsApp non è configurato: manca l\'ID del numero o il token.', 422);
+    const name = (await pool.query<{ name: string }>('SELECT name FROM tenants WHERE id = $1', [id])).rows[0]?.name ?? 'Prova';
+    try {
+      await wa.sendProposalTemplate(cfg, phone, ['Mario', name, 'prodotto di prova', 'PROVA-1', 'domani', '08:00 e le 11:00'], 'TEST:0', 'TEST:0');
+    } catch (err) {
+      throw new DomainError('wa_failed', `Meta ha rifiutato il messaggio: ${(err as Error).message}`, 422);
+    }
+    return { ok: true, from: cfg.phoneNumberId === config.WHATSAPP_PHONE_NUMBER_ID ? 'generale' : 'cliente' };
+  });
 
   app.get('/slug', async (req) => ({ slug: slugify(z.object({ name: z.string() }).parse(req.query).name) }));
 
