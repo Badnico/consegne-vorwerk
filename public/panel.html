@@ -321,7 +321,9 @@ a.btn{text-decoration:none;color:inherit;display:inline-flex;align-items:center}
         <div class="filters">
           <div class="chipsf" id="filters" role="group" aria-label="Filtra le consegne"></div>
           <input class="search" id="q" type="search" placeholder="Cerca nome, ordine o CAP" aria-label="Cerca">
+          <button class="btn ghost danger" id="delAllAsk" type="button">Elimina tutte</button>
         </div>
+        <div class="rowpanel warn" id="delAllBar" hidden></div>
         <div class="list" id="list"></div>
         <div class="bulk" id="bulk"></div>
       </div>
@@ -889,6 +891,19 @@ $('p-list').addEventListener('click', async e => {
   if (d.del){ ui.rowOpen = {id:d.del, kind:'del'}; renderList(); return; }
   if (t.id === 'bulkAsk'){ ui.bulkAsk = true; renderList(); return; }
   if (t.id === 'bulkNo'){ ui.bulkAsk = false; renderList(); return; }
+  if (t.id === 'delAllAsk'){
+    const n = deliveries.length, bar = $('delAllBar');
+    if (!n){ toast('Non ci sono consegne da eliminare'); return; }
+    bar.innerHTML = `<span>Eliminare definitivamente <b>tutte le ${n} consegne</b>? I posti in calendario si liberano, i messaggi non ancora partiti vengono annullati e i link dei clienti smettono di funzionare. Non si può annullare.</span><button class="btn primary" id="delAllGo" type="button">Sì, elimina tutte</button><button class="btn ghost" id="delAllNo" type="button">Annulla</button>`;
+    bar.hidden = false; return;
+  }
+  if (t.id === 'delAllNo'){ $('delAllBar').hidden = true; return; }
+  if (t.id === 'delAllGo'){
+    t.disabled = true;
+    try { const r = await run(() => api('/deliveries/delete-all', {method:'POST', body:{}})); ui.simId = null; ui.rowOpen = null; toast(`${r.deleted} ${r.deleted===1?'consegna eliminata':'consegne eliminate'}`); }
+    catch {}
+    $('delAllBar').hidden = true; renderList(); return;
+  }
   t.disabled = true;
   try {
     if (d.done){ await run(() => api(`/deliveries/${d.done}/delivered`, {method:'POST', body:{}}), 'Segnata come consegnata: la trovi in Eseguite'); ui.rowOpen = null; }

@@ -423,3 +423,15 @@ test('Excel: i clienti esclusi dal primo messaggio non occupano fasce', () => {
   assert.equal(plan[0]!.slot, null); assert.equal(plan[0]!.slotIssue, null);
   assert.deepEqual(plan[1]!.slot, { date: '2030-01-01', bandId: '08:00-11:00' }); // l'unico posto resta al cliente che riceve il messaggio
 });
+
+test('elimina tutte: cancella ogni consegna dell\'ambiente e libera i posti, senza toccare gli altri ambienti', async () => {
+  const a = await slot('03:00', 5);
+  for (let i = 0; i < 3; i++) await createDelivery(T, { order_ref: order(), customer, address: 'Via Z 1', slot_id: a }, 'test');
+  const s2 = (await openSlots(pool, T2)).slots.find((s) => s.free > 0)!;
+  await createDelivery(T2, { order_ref: order(), customer, address: 'Via W 1', slot_id: s2.id }, 'test');
+  const ids = (await pool.query<{ id: string }>('SELECT id FROM deliveries WHERE tenant_id = $1', [T])).rows;
+  for (const { id } of ids) await deleteDelivery(id, T);
+  assert.equal((await pool.query('SELECT 1 FROM deliveries WHERE tenant_id = $1', [T])).rowCount, 0);
+  assert.equal(await booked(a), 0);
+  assert.ok(((await pool.query('SELECT 1 FROM deliveries WHERE tenant_id = $1', [T2])).rowCount ?? 0) > 0);
+});

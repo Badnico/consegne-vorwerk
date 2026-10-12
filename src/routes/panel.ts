@@ -204,6 +204,14 @@ export async function panelRoutes(app: FastifyInstance) {
     return reply.code(204).send();
   });
 
+  /** Elimina tutte le consegne dell'ambiente: libera i posti e annulla i messaggi non ancora partiti. */
+  app.post('/deliveries/delete-all', async (req) => {
+    const t = tenantOf(req);
+    const r = await pool.query<{ id: string }>('SELECT id FROM deliveries WHERE tenant_id = $1', [t]);
+    for (const { id } of r.rows) await deleteDelivery(id, t);
+    return { deleted: r.rows.length };
+  });
+
   app.post('/deliveries/delete-delivered', async (req) => {
     const t = tenantOf(req);
     const r = await pool.query<{ id: string }>(`SELECT id FROM deliveries WHERE tenant_id = $1 AND status = 'delivered'`, [t]);
