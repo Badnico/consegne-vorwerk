@@ -362,6 +362,9 @@ test('esclusioni dal primo messaggio: CAP, località o provincia', async () => {
   assert.equal(noSendMatch(list, { cap: '20155' }), '201*');
   assert.equal(noSendMatch(list, { city: 'Andrano' }), 'ANDRANO');
   assert.equal(noSendMatch(list, { province: 'TA' }), 'ta');
+  assert.equal(noSendMatch('LECCE', { city: 'BOTRUGNO', province: 'LE' }), 'LECCE'); // nome della provincia
+  assert.equal(noSendMatch('Barletta Andria Trani', { province: 'BT' }), 'Barletta Andria Trani');
+  assert.equal(noSendMatch('LECCE', { city: 'MATERA', province: 'MT' }), null);
   assert.equal(noSendMatch(list, { cap: '70121', city: 'BARI', province: 'BA' }), null);
   assert.equal(noSendMatch('', { cap: '20121' }), null);
   const a = await slot('05:00', 2);
@@ -408,4 +411,15 @@ test('Excel con più fogli e colonne del gestionale (Brand, contrassegno, priori
   assert.deepEqual(brands, ['BIMBY', 'FOLLETTO']);
   const anyDate = [ws.getRow(2).getCell(15).value, ws.getRow(3).getCell(15).value].some((v) => v instanceof Date);
   assert.ok(anyDate); // le date restano date
+});
+
+test('Excel: i clienti esclusi dal primo messaggio non occupano fasce', () => {
+  const open = { first: '2030-01-01', slots: [{ id: 'a', date: '2030-01-01', start: '08:00', end: '11:00', free: 1 }] };
+  const base = { address: 'Via 1', cap: '', phone: '+393331112222', email: '', product: '', date: null, band: null, sheet: 'X', city: 'BOTRUGNO', province: 'LE', cod_amount: 0, pickup: false, source: [] };
+  const plan = planSlots([
+    { ...base, line: 2, name: 'Escluso', order_ref: 'E1' },
+    { ...base, line: 3, name: 'Normale', order_ref: 'N1', province: 'BA', city: 'BARI' },
+  ], open, new Set(), new Set(), (r) => Boolean(noSendMatch('LECCE', r)));
+  assert.equal(plan[0]!.slot, null); assert.equal(plan[0]!.slotIssue, null);
+  assert.deepEqual(plan[1]!.slot, { date: '2030-01-01', bandId: '08:00-11:00' }); // l'unico posto resta al cliente che riceve il messaggio
 });

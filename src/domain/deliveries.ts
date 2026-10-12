@@ -114,13 +114,18 @@ async function logEvent(db: Db, id: string, from: Status | null, to: Status, act
 }
 
 /** Crea la consegna occupando subito il posto nello slot proposto. */
-export async function createDelivery(tenantId: string, input: NewDelivery, actor: string): Promise<string> {
+/**
+ * Crea la consegna occupando un posto nello slot proposto.
+ * Con notSent (CAP/località esclusi) non occupa posti e nasce già "fuori area, da contattare": il primo messaggio non parte.
+ */
+export async function createDelivery(tenantId: string, input: NewDelivery, actor: string, opts: { notSent?: string } = {}): Promise<string> {
   return tx(async (c) => {
     const slot = await getSlot(c, input.slot_id);
     if (!slot || slot.tenant_id !== tenantId) throw notFound('Slot');
     const existing = await c.query('SELECT 1 FROM deliveries WHERE tenant_id = $1 AND order_ref = $2', [tenantId, input.order_ref]);
     if (existing.rowCount) throw new DomainError('duplicate_order', `L'ordine ${input.order_ref} esiste già.`);
-    if (!(await reserve(c, slot.id))) throw slotFull();
+    const notSent = opts.notSent;
+    if (!notSent && !(await reserve(c, slot.id))) throw slotFull();
 
     const cust = await c.query<{ id: string }>(
       'INSERT INTO customers (tenant_id, name, phone_e164, email, consent_whatsapp) VALUES ($5, $1, $2, $3, $4) RETURNING id',
@@ -128,12 +133,13 @@ export async function createDelivery(tenantId: string, input: NewDelivery, actor
     );
     const d = await c.query<{ id: string }>(
       `INSERT INTO deliveries (tenant_id, order_ref, customer_id, address, cap, product, slot_id, proposed_slot_id, status, city, province, cod_amount, pickup, source)
-       VALUES ($7, $1, $2, $3, $4, $5, $6, $6, 'proposed', $8, $9, $10, $11, $12) RETURNING id`,
+       VALUES ($7, $1, $2, $3, $4, $5, $13, $6, $14, $8, $9, $10, $11, $12) RETURNING id`,
       [input.order_ref, cust.rows[0]!.id, input.address, input.cap ?? null, input.product ?? null, slot.id, tenantId,
-        input.city ?? null, input.province ?? null, input.cod_amount ?? 0, input.pickup ?? false, input.source ? JSON.stringify(input.source) : null],
+        input.city ?? null, input.province ?? null, input.cod_amount ?? 0, input.pickup ?? false, input.source ? JSON.stringify(input.source) : null,
+        notSent ? null : slot.id, notSent ? 'out_of_area' : 'proposed'],
     );
     const id = d.rows[0]!.id;
-    await logEvent(c, id, null, 'proposed', actor);
+    await logEvent(c, id, null, notSent ? 'out_of_area' : 'proposed', actor, notSent ? `Primo messaggio non inviato (escluso: ${notSent})` : undefined);
     return id;
   });
 }

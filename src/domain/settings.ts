@@ -88,19 +88,38 @@ export function canSelfBook(area: AreaSetting, cap: string | null | undefined): 
 
 const normPlace = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
 
+/** Sigle e nomi delle province italiane: per escludere scrivendo "LECCE" anche se il file ha solo la sigla "LE". */
+export const PROVINCE: Record<string, string> = {
+  AG: 'Agrigento', AL: 'Alessandria', AN: 'Ancona', AO: 'Aosta', AP: 'Ascoli Piceno', AQ: "L'Aquila", AR: 'Arezzo', AT: 'Asti',
+  AV: 'Avellino', BA: 'Bari', BG: 'Bergamo', BI: 'Biella', BL: 'Belluno', BN: 'Benevento', BO: 'Bologna', BR: 'Brindisi',
+  BS: 'Brescia', BT: 'Barletta-Andria-Trani', BZ: 'Bolzano', CA: 'Cagliari', CB: 'Campobasso', CE: 'Caserta', CH: 'Chieti',
+  CL: 'Caltanissetta', CN: 'Cuneo', CO: 'Como', CR: 'Cremona', CS: 'Cosenza', CT: 'Catania', CZ: 'Catanzaro', EN: 'Enna',
+  FC: 'Forlì-Cesena', FE: 'Ferrara', FG: 'Foggia', FI: 'Firenze', FM: 'Fermo', FR: 'Frosinone', GE: 'Genova', GO: 'Gorizia',
+  GR: 'Grosseto', IM: 'Imperia', IS: 'Isernia', KR: 'Crotone', LC: 'Lecco', LE: 'Lecce', LI: 'Livorno', LO: 'Lodi', LT: 'Latina',
+  LU: 'Lucca', MB: 'Monza e Brianza', MC: 'Macerata', ME: 'Messina', MI: 'Milano', MN: 'Mantova', MO: 'Modena', MS: 'Massa-Carrara',
+  MT: 'Matera', NA: 'Napoli', NO: 'Novara', NU: 'Nuoro', OR: 'Oristano', PA: 'Palermo', PC: 'Piacenza', PD: 'Padova', PE: 'Pescara',
+  PG: 'Perugia', PI: 'Pisa', PN: 'Pordenone', PO: 'Prato', PR: 'Parma', PT: 'Pistoia', PU: 'Pesaro e Urbino', PV: 'Pavia',
+  PZ: 'Potenza', RA: 'Ravenna', RC: 'Reggio Calabria', RE: 'Reggio Emilia', RG: 'Ragusa', RI: 'Rieti', RM: 'Roma', RN: 'Rimini',
+  RO: 'Rovigo', SA: 'Salerno', SI: 'Siena', SO: 'Sondrio', SP: 'La Spezia', SR: 'Siracusa', SS: 'Sassari', SU: 'Sud Sardegna',
+  SV: 'Savona', TA: 'Taranto', TE: 'Teramo', TN: 'Trento', TO: 'Torino', TP: 'Trapani', TR: 'Terni', TS: 'Trieste', TV: 'Treviso',
+  UD: 'Udine', VA: 'Varese', VB: 'Verbano-Cusio-Ossola', VC: 'Vercelli', VE: 'Venezia', VI: 'Vicenza', VR: 'Verona', VT: 'Viterbo',
+  VV: 'Vibo Valentia',
+};
+
 /**
- * Esclusione dal primo messaggio: righe/virgole con CAP (20121, 20121-20162, 201*), nomi di località (ANDRANO)
- * o sigle di provincia (LE). Restituisce la voce che corrisponde, oppure null.
+ * Esclusione dal primo messaggio: righe/virgole con CAP (20121, 20121-20162, 201*), nomi di località (ANDRANO),
+ * sigle di provincia (LE) o nomi di provincia (LECCE). Restituisce la voce che corrisponde, oppure null.
  */
 export function noSendMatch(list: string | undefined, d: { cap?: string | null; city?: string | null; province?: string | null }): string | null {
   if (!list?.trim()) return null;
   const city = normPlace(d.city ?? ''), prov = normPlace(d.province ?? '');
+  const provName = normPlace(PROVINCE[prov] ?? ''); // "LE" → "LECCE"
   for (const raw of list.split(/[\n,;]+/)) {
     const t = raw.trim(); if (!t) continue;
     const { rules } = parseArea(t);
     if (rules.length) { if (/^\d{5}$/.test(d.cap ?? '') && rules.some((r) => d.cap! >= r.a && d.cap! <= r.b)) return t; continue; }
     const n = normPlace(t);
-    if (n && (n === city || n === prov)) return t;
+    if (n && (n === city || n === prov || n === provName)) return t;
   }
   return null;
 }

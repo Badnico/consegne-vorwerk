@@ -137,15 +137,14 @@ export async function panelRoutes(app: FastifyInstance) {
     if (b.email && !z.string().email().safeParse(b.email).success) throw new DomainError('invalid_email', 'Email non valida.', 422);
     const phone = b.phone ? b.phone.replace(/[^\d+]/g, '').replace(/^(?!\+)/, '+39') : null;
     const t = tenantOf(req);
+    const excluded = noSendMatch((await getArea(pool, t)).noSend, { cap: b.cap });
     const id = await createDelivery(t, {
       order_ref: await newOrderRef(t),
       customer: { name: b.name, phone_e164: phone, email: b.email || null, consent_whatsapp: Boolean(phone) },
       address: b.address, cap: b.cap, product: b.product || null,
       slot_id: await slotIdFor(t, b.date, b.bandId),
-    }, actorOf(req));
-    const excluded = noSendMatch((await getArea(pool, t)).noSend, { cap: b.cap });
-    if (excluded) await markNotSent(id, excluded, actorOf(req));
-    else await enqueue.proposal(id);
+    }, actorOf(req), { notSent: excluded ?? undefined });
+    if (!excluded) await enqueue.proposal(id);
     return reply.code(201).send(toPanel(await getDelivery(pool, id)));
   });
 
@@ -252,8 +251,9 @@ export async function panelRoutes(app: FastifyInstance) {
     catch (err) { throw new DomainError('invalid_file', (err as Error).message, 422); }
     if (parsed.missing.length) throw new DomainError('missing_columns', `Nel file mancano le colonne: ${parsed.missing.join(', ')}. Scarica il modello per vedere come deve essere.`, 422);
     const open = await openSlots(pool, t);
-    const planned = planSlots(parsed.rows, open, await existingRefs(t), await openPeople(t));
     const noSend = (await getArea(pool, t)).noSend;
+    // gli esclusi non ricevono il messaggio: non serve una fascia e non occupano posti
+    const planned = planSlots(parsed.rows, open, await existingRefs(t), await openPeople(t), (r) => Boolean(noSendMatch(noSend, r)));
     const sheets = [...new Set([...planned, ...parsed.errors].map((r) => r.sheet))];
     const rows = [...planned, ...parsed.errors]
       .sort((a, b2) => sheets.indexOf(a.sheet) - sheets.indexOf(b2.sheet) || a.line - b2.line)
@@ -261,7 +261,7 @@ export async function panelRoutes(app: FastifyInstance) {
     if (!rows.length) throw new DomainError('empty_file', 'Il file non contiene consegne: sotto le intestazioni non ci sono righe compilate.', 422);
     // fasce disponibili, per scegliere data e fascia riga per riga prima dell'invio
     const slots = open.slots.map((s) => ({ date: s.date, bandId: `${s.start}-${s.end}`, free: s.free }));
-    return { rows, ok: rows.filter((r) => !r.errors.length && !r.slotIssue).length, first: open.first, slots };
+    return { rows, ok: rows.filter((r) => !r.errors.length && (!r.slotIssue || r.noSend)).length, first: open.first, slots };
   });
 
   /** Crea le consegne valide e invia a tutti il messaggio. Le fasce vengono ricontrollate al momento. */
@@ -282,7 +282,14 @@ export async function panelRoutes(app: FastifyInstance) {
     const results: { line: number; sheet: string; ok: boolean; error?: string; name: string; notSent?: boolean; slot?: { date: string; bandId: string } }[] = [];
     for (const r of b.rows as ImportRow[]) {
       // ricalcola lo slot con i posti di adesso (nel frattempo altri potrebbero averli presi)
-      const [plan] = planSlots([r], await openSlots(pool, t), refs, people);
+      const open = await openSlots(pool, t);
+      const excluded = noSendMatch(noSend, r);
+      const [plan] = planSlots([r], open, refs, people, () => Boolean(excluded));
+      if (excluded && plan && !plan.errors.length && !plan.slot) {
+        // senza messaggio: serve solo una data di riferimento (la prima disponibile); il posto non viene occupato
+        const ref0 = open.slots.find((s) => s.date >= open.first) ?? open.slots[0];
+        if (ref0) plan.slot = { date: ref0.date, bandId: `${ref0.start}-${ref0.end}` };
+      }
       if (!plan || plan.errors.length || !plan.slot) { results.push({ line: r.line, sheet: r.sheet, ok: false, name: r.name, error: [...(plan?.errors ?? []), plan?.slotIssue].filter(Boolean).join('; ') || 'non inviata' }); continue; }
       try {
         const ref = r.order_ref || await newOrderRef(t, refs);
@@ -292,11 +299,9 @@ export async function panelRoutes(app: FastifyInstance) {
           address: r.address, cap: r.cap || null, product: r.product || null,
           city: r.city || null, province: r.province || null, cod_amount: r.cod_amount, pickup: r.pickup, source: r.source,
           slot_id: await slotIdFor(t, plan.slot.date, plan.slot.bandId),
-        }, actor);
+        }, actor, { notSent: excluded ?? undefined });
         refs.add(ref.toLowerCase()); people.add(personKey(r.name, r.address));
-        const excluded = noSendMatch(noSend, r);
-        if (excluded) await markNotSent(id, excluded, actor);
-        else await enqueue.proposal(id);
+        if (!excluded) await enqueue.proposal(id);
         results.push({ line: r.line, sheet: r.sheet, ok: true, name: r.name, slot: plan.slot, notSent: Boolean(excluded) });
       } catch (err) {
         results.push({ line: r.line, sheet: r.sheet, ok: false, name: r.name, error: err instanceof DomainError ? err.message : 'errore imprevisto' });

@@ -411,7 +411,7 @@ a.btn{text-decoration:none;color:inherit;display:inline-flex;align-items:center}
         <fieldset>
           <legend>Non mandare il primo messaggio a</legend>
           <label class="f">CAP, località o sigle di provincia, uno per riga (o separati da virgole)<textarea id="areaNoSend" rows="4" class="mono" spellcheck="false" placeholder="20121&#10;201*&#10;ANDRANO&#10;LE"></textarea></label>
-          <p class="hint note">Questi clienti vengono inseriti ma <b>non ricevono il primo messaggio</b>: la consegna compare subito come "Fuori area, da contattare" e la data la assegni tu. Funziona anche se il file Excel non ha la colonna CAP: in quel caso scrivi la località (es. <span class="mono">ANDRANO</span>) o la provincia (es. <span class="mono">LE</span>).</p>
+          <p class="hint note">Questi clienti vengono inseriti ma <b>non ricevono il primo messaggio</b>: la consegna compare subito come "Fuori area, da contattare" e la data la assegni tu. Funziona anche se il file Excel non ha la colonna CAP: in quel caso scrivi la località (es. <span class="mono">ANDRANO</span>) o la provincia, con la sigla o il nome (es. <span class="mono">LE</span> o <span class="mono">LECCE</span>).</p>
         </fieldset>
         <fieldset>
           <legend>Prova un CAP</legend>
@@ -1123,13 +1123,14 @@ $('impFile').addEventListener('change', async e => {
   renderImport();
 });
 const impSendable = x => !x.errors.length;
+const impNeedsSlot = x => impSendable(x) && !x.noSend; // gli esclusi non ricevono il messaggio: niente fascia
 /** Controlla le scelte riga per riga contando i posti presi dalle righe precedenti. */
 function impCheck(){
   const used = {};
   for (const x of imp.rows){
     x.issue = null;
-    if (!impSendable(x)) continue;
-    if (!x.sel.date){ x.issue = 'scegli la data'; continue; }
+    if (!impNeedsSlot(x)) continue;
+    if (!x.sel.date){ x.issue = x.slotIssue ? `${x.slotIssue}: aumenta la capienza in "Slot e capienza" oppure scegli un altro giorno` : 'scegli la data'; continue; }
     if (!x.sel.bandId){ x.issue = imp.slots.some(s => s.date === x.sel.date) ? 'scegli la fascia' : 'in questo giorno non ci sono consegne'; continue; }
     const s = imp.slots.find(s => s.date === x.sel.date && s.bandId === x.sel.bandId);
     if (!s){ x.issue = 'fascia non disponibile in questo giorno'; continue; }
@@ -1140,14 +1141,14 @@ function impCheck(){
 /** Posti liberi di una fascia tolte le altre righe che l'hanno già scelta. */
 function impFree(date, bandId, except){
   const s = imp.slots.find(s => s.date === date && s.bandId === bandId); if (!s) return 0;
-  return s.free - imp.rows.filter(x => x !== except && impSendable(x) && x.sel.date === date && x.sel.bandId === bandId).length;
+  return s.free - imp.rows.filter(x => x !== except && impNeedsSlot(x) && x.sel.date === date && x.sel.bandId === bandId).length;
 }
 /** Assegna a tutte le righe la prima fascia libera, dal preavviso minimo in poi, secondo "Slot e capienza". */
 function impAuto(){
   const left = {}; imp.slots.forEach(s => left[s.date+'|'+s.bandId] = s.free);
   let none = 0;
   for (const x of imp.rows){
-    if (!impSendable(x)) continue;
+    if (!impNeedsSlot(x)) continue;
     const s = imp.slots.find(s => s.date >= imp.first && left[s.date+'|'+s.bandId] > 0);
     if (s){ left[s.date+'|'+s.bandId]--; x.sel = {date:s.date, bandId:s.bandId}; } else { x.sel = {date:'', bandId:''}; none++; }
   }
@@ -1186,7 +1187,8 @@ function renderImport(){
       <td>${esc(x.address)}<small class="mono">${esc(x.cap)}${x.cap && area.on && !inArea(x.cap) ? ' · fuori area' : ''}</small></td>
       <td>${x.phone?`<span class="mono">${esc(x.phone)}</span>`:''}${x.email?`<small>${esc(x.email)}</small>`:''}</td>
       <td class="mono">${esc(x.order_ref) || '<small>automatico</small>'}</td>
-      ${impSendable(x)
+      ${x.noSend && impSendable(x) ? `<td colspan="2"><small>Nessun messaggio: la data la assegni tu dopo averlo chiamato</small></td>`
+        : impSendable(x)
         ? `<td><input type="date" data-impd="${i}" value="${x.sel.date}" min="${minD}" max="${maxD}" aria-label="Data proposta riga ${x.line}"></td>
            <td><select data-impb="${i}" aria-label="Fascia oraria riga ${x.line}">${impBandOptions(x)}</select>${x.issue ? `<small class="why">${esc(x.issue)}</small>` : ''}</td>`
         : `<td colspan="2"><span class="why">${esc(x.errors.join('; '))}</span></td>`}</tr>`).join('')}</tbody></table></div>
@@ -1209,12 +1211,12 @@ $('impPrev').addEventListener('click', async e => {
   if (e.target.closest('#impAll')){
     const dd = $('impAllD').value, bb = $('impAllB').value;
     if (!dd && !bb){ toast('Scegli una data, una fascia o entrambe'); return; }
-    imp.rows.filter(impSendable).forEach(x => { if (dd) x.sel.date = dd; if (bb) x.sel.bandId = bb; });
+    imp.rows.filter(impNeedsSlot).forEach(x => { if (dd) x.sel.date = dd; if (bb) x.sel.bandId = bb; });
     renderImport(); return;
   }
   if (!e.target.closest('#impGo') || imp.busy) return;
   impCheck();
-  const rows = imp.rows.filter(x => impSendable(x) && !x.issue).map(({errors, slot, slotIssue, auto, sel, issue, noSend, ...r}) => ({...r, date: sel.date, band: sel.bandId.split('-')[0]}));
+  const rows = imp.rows.filter(x => impSendable(x) && !x.issue).map(({errors, slot, slotIssue, auto, sel, issue, noSend, ...r}) => noSend ? {...r, date: null, band: null} : ({...r, date: sel.date, band: sel.bandId.split('-')[0]}));
   imp.busy = true; renderImport();
   try {
     imp.result = await api('/import/commit', {body:{rows}}); imp.rows = null;

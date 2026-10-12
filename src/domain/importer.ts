@@ -248,7 +248,7 @@ export async function openSlots(db: Db, tenantId: string) {
  */
 export const personKey = (name: string, address: string) => `${norm(name)}|${norm(address)}`;
 
-export function planSlots(rows: ImportRow[], open: { slots: SlotRow[]; first: string }, existingRefs: Set<string>, existingPeople = new Set<string>()): PlannedRow[] {
+export function planSlots(rows: ImportRow[], open: { slots: SlotRow[]; first: string }, existingRefs: Set<string>, existingPeople = new Set<string>(), skipSlot: (r: ImportRow) => boolean = () => false): PlannedRow[] {
   const free = new Map(open.slots.map((s) => [s.id, s.free]));
   const seen = new Set<string>(), seenPeople = new Set<string>();
   return rows.map((row) => {
@@ -266,6 +266,7 @@ export function planSlots(rows: ImportRow[], open: { slots: SlotRow[]; first: st
       else if (seen.has(k)) errors.push(`l'ordine ${row.order_ref} è ripetuto nel file`);
       seen.add(k);
     }
+    if (skipSlot(row)) return { ...row, errors, slot: null, slotIssue: null, auto: false }; // escluso dal primo messaggio
     const auto = !(row.date && row.band);
     const candidates = open.slots.filter((s) =>
       (row.date ? s.date === row.date : s.date >= open.first) && (row.band ? s.start === row.band : true));
