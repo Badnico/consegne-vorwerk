@@ -458,3 +458,27 @@ test('WhatsApp del cliente: i messaggi partono dal suo numero con il suo token; 
   assert.equal(wa.verifySignature(raw, sig, ['altra']), false);
   await saveWaSetting(pool, T, { phoneNumberId: '', token: '', appSecret: '', template: '', lang: '' });
 });
+
+test('messaggi dei clienti: collegati alla consegna dal numero, separati per numero WhatsApp, non letti', async () => {
+  const { findDeliveryForPhone, inboundText, inboxSummary, markRead } = await import('../src/domain/inbox.js');
+  const { saveWaSetting } = await import('../src/domain/settings.js');
+  const a = await slot('02:00', 5);
+  const s2 = (await openSlots(pool, T2)).slots.find((s) => s.free > 0)!;
+  const c = { name: 'Lucia Verdi', phone_e164: '+393409998877' };
+  const id1 = await createDelivery(T, { order_ref: order(), customer: c, address: 'Via A 1', slot_id: a }, 'test');
+  const id2 = await createDelivery(T2, { order_ref: order(), customer: c, address: 'Via A 1', slot_id: s2.id }, 'test');
+  // numero generale: lo stesso cliente in due ambienti → la consegna più recente
+  assert.equal(await findDeliveryForPhone(pool, '393409998877', '999'), id2);
+  // T ha il suo numero WhatsApp: i messaggi arrivati su quel numero vanno solo a T
+  await saveWaSetting(pool, T, { phoneNumberId: '555', token: 't', appSecret: '', template: '', lang: '' });
+  assert.equal(await findDeliveryForPhone(pool, '393409998877', '555'), id1);
+  assert.equal(await findDeliveryForPhone(pool, '393409998877', '999'), id2); // sul numero generale T è escluso
+  await saveWaSetting(pool, T, { phoneNumberId: '', token: '', appSecret: '', template: '', lang: '' });
+  assert.equal(await findDeliveryForPhone(pool, '390000000000', '999'), null);
+  assert.equal(inboundText({ type: 'text', text: { body: 'ciao' } }), 'ciao');
+  assert.equal(inboundText({ type: 'audio' }), '[messaggio vocale]');
+  await pool.query(`INSERT INTO messages (delivery_id, channel, direction, kind, provider_id, status, body) VALUES ($1, 'whatsapp', 'in', 'text', 'wamid.t1', 'received', 'posso solo il pomeriggio')`, [id1]);
+  assert.equal((await inboxSummary(pool, [id1])).get(id1)!.unread, 1);
+  await markRead(pool, id1);
+  assert.equal((await inboxSummary(pool, [id1])).get(id1)!.unread, 0);
+});

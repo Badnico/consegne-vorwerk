@@ -17,6 +17,9 @@ import { createToken, customerUrl } from '../domain/tokens.js';
 import { getFeatures, getFlow, getReportSetting, noSendMatch, saveFlow, saveReportSetting } from '../domain/settings.js';
 import { openSlots, parseWorkbook, personKey, planSlots, templateWorkbook, type ImportRow, type PlannedRow } from '../domain/importer.js';
 import { createReport, deleteReport, getReportFile, listReports } from '../domain/report.js';
+import { conversation, FREE_WINDOW_HOURS, inboxSummary, lastInbound, markRead } from '../domain/inbox.js';
+import { waConfigFor } from '../notify/notifier.js';
+import * as wa from '../notify/whatsapp.js';
 import { enqueue } from '../jobs/queue.js';
 
 /**
@@ -112,13 +115,14 @@ export async function panelRoutes(app: FastifyInstance) {
     const today = todayLocal();
     const list = await listDeliveries(pool, t, { openOrSince: addDays(today, -60) });
     const logs = await deliveryEvents(pool, list.map((d) => d.id));
+    const inbox = await inboxSummary(pool, list.map((d) => d.id));
     return {
       today,
       schedule: await getSchedule(t),
       area: await getArea(pool, t),
       messages: await getMessages(pool, t),
       flow: await getFlow(pool, t),
-      deliveries: list.map((d) => toPanel(d, logs.get(d.id))),
+      deliveries: list.map((d) => ({ ...toPanel(d, logs.get(d.id)), unread: inbox.get(d.id)?.unread ?? 0, lastIn: inbox.get(d.id)?.lastIn ?? null })),
     };
   });
 
@@ -182,6 +186,46 @@ export async function panelRoutes(app: FastifyInstance) {
     else if ((await answerPin(id, answer === 'pin_yes', actor, t)) === 'confirmed') await enqueue.afterConfirm(id);
     else await enqueue.afterDecline(id);
     return toPanel(await getDelivery(pool, id));
+  });
+
+  /* ---------- messaggi del cliente ---------- */
+
+  app.get('/deliveries/:id/messages', async (req) => {
+    const { id } = idParam.parse(req.params);
+    await getDelivery(pool, id, tenantOf(req)); // controlla che sia di questo ambiente
+    const last = await lastInbound(pool, id);
+    const until = last ? new Date(last.getTime() + FREE_WINDOW_HOURS * 3600_000) : null;
+    return { messages: await conversation(pool, id), replyUntil: until && until > new Date() ? until.toISOString() : null };
+  });
+
+  app.post('/deliveries/:id/messages/read', async (req) => {
+    const { id } = idParam.parse(req.params);
+    await getDelivery(pool, id, tenantOf(req));
+    await markRead(pool, id);
+    return { ok: true };
+  });
+
+  /** Risposta dell'operatore su WhatsApp: possibile solo entro 24 ore dall'ultimo messaggio del cliente. */
+  app.post('/deliveries/:id/reply', async (req) => {
+    const { id } = idParam.parse(req.params);
+    const { text } = z.object({ text: z.string().trim().min(1, 'Scrivi il messaggio').max(4000) }).parse(req.body);
+    const d = await getDelivery(pool, id, tenantOf(req));
+    if (!d.phone_e164) throw new DomainError('no_phone', 'Questo cliente non ha un numero WhatsApp.', 422);
+    const last = await lastInbound(pool, id);
+    if (!last || Date.now() - last.getTime() > FREE_WINDOW_HOURS * 3600_000) {
+      throw new DomainError('window_closed', `WhatsApp permette di scrivere liberamente solo entro ${FREE_WINDOW_HOURS} ore dall'ultimo messaggio del cliente. Chiamalo, oppure aspetta che ti scriva.`, 422);
+    }
+    const cfg = await waConfigFor(d.tenant_id);
+    if (!cfg) throw new DomainError('wa_missing', 'WhatsApp non è ancora collegato.', 422);
+    let providerId: string;
+    try { providerId = await wa.sendText(cfg, d.phone_e164, text); }
+    catch (err) { throw new DomainError('wa_failed', `WhatsApp ha rifiutato il messaggio: ${(err as Error).message}`, 422); }
+    await pool.query(
+      `INSERT INTO messages (delivery_id, channel, direction, kind, provider_id, status, body) VALUES ($1, 'whatsapp', 'out', 'manual', $2, 'sent', $3)`,
+      [id, providerId, text],
+    );
+    await markRead(pool, id);
+    return { ok: true };
   });
 
   app.post('/deliveries/:id/delivered', async (req) => {

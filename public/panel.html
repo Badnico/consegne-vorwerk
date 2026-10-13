@@ -268,6 +268,11 @@ a.btn{text-decoration:none;color:inherit;display:inline-flex;align-items:center}
 .row .who small{display:block}
 .row .who .tagx{margin:3px 4px 0 0;white-space:nowrap}
 .imptab .tagx{display:inline-block;margin:3px 4px 0 0;white-space:nowrap}
+.replybox{margin-top:10px;border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:10px 12px;display:grid;gap:8px}
+.replybox textarea{font:inherit;width:100%;border:1px solid var(--line);border-radius:8px;padding:8px;background:var(--bg);color:var(--fg);resize:vertical}
+.replybox small{color:var(--muted);flex:1 1 200px}
+.tagx.msg{background:var(--blue-soft);color:var(--blue);margin-left:6px;vertical-align:middle}
+.bub.in-text{border:1px solid var(--blue)}
 </style>
 </head>
 <body>
@@ -453,6 +458,10 @@ a.btn{text-decoration:none;color:inherit;display:inline-flex;align-items:center}
       <div class="cust" id="cust" hidden></div>
       <div class="phone"><div class="screen" id="screen"></div></div>
       <div class="rowpanel askbar" id="askBar" hidden></div>
+      <div class="replybox" id="replyBox" hidden>
+        <label class="f">Rispondi al cliente su WhatsApp<textarea id="replyText" rows="2" placeholder="Scrivi qui la risposta…"></textarea></label>
+        <div class="btngroup"><button class="btn primary" id="replyGo" type="button">Invia</button><small id="replyInfo"></small></div>
+      </div>
       <p class="note">Puoi usare i tasti come se fossi il cliente (per esempio se ti ha risposto al telefono). Funzionano davvero: la consegna cambia stato e il cliente riceve i messaggi. Prima di ogni risposta ti chiediamo conferma.</p>
     </aside>
   </div>
@@ -515,6 +524,7 @@ async function load(){
     if (msgChanged && !msgDraft) renderMsgEditor();
     if (!loaded){ setDefaultDate(); loaded = true; }
     if (ui.view === 'pick') await loadAvail(true);
+    if (ui.simId && ui.conv && ui.conv.id === ui.simId) loadConv(ui.simId, true); // nuovi messaggi del cliente
     renderAll(); setSync(true);
   } catch (e) { setSync(false, e.message); }
 }
@@ -820,6 +830,7 @@ function renderCal(){
 }
 const FILTERS = [
   {k:'tutte', label:'Tutte', test:() => true},
+  {k:'msg', label:'Con messaggi', test:x => (x.unread || 0) > 0},
   {k:'daconf', label:'Da confermare', test:x => ['inviato','attesa_pin','da_riprogrammare','fuori_area','senza_risposta'].includes(x.status)},
   {k:'conf', label:'Confermate', test:x => ['confermato','riprogrammato'].includes(x.status)},
   {k:'chiudere', label:'Da chiudere', test:x => isToClose(x)},
@@ -871,7 +882,7 @@ function renderList(){
   else $('list').innerHTML = `<div class="row head"><span>Ordine</span><span>Cliente</span><span>Consegna</span><span>Stato</span><span></span></div>` +
     rows.map(x => `<div class="row ${x.id===ui.simId?'sel':''} ${x.status==='consegnata'?'done':''}">
       <span class="code mono">${esc(x.code)}${x.example?'<span class="tag">esempio</span>':''}</span>
-      <span class="who"><b>${esc(x.name)}</b><small>${esc(x.address)}${capOf(x) ? ' · <span class="mono">'+esc(capOf(x))+'</span>' : ''}${area.on && !inArea(capOf(x)) ? ' · <span class="capout out">fuori area</span>' : ''}${x.failed ? ` · <span class="capout out">${x.failed} ${x.failed===1?'tentativo':'tentativi'} non riusciti</span>` : ''}${(x.cod||0) > 0 ? `<span class="tagx">contrassegno ${(x.cod).toLocaleString('it-IT',{style:'currency',currency:'EUR'})}</span>` : ''}${x.pickup ? '<span class="tagx pk">ritiro</span>' : ''}</small></span>
+      <span class="who"><b>${esc(x.name)}${x.unread ? `<span class="tagx msg" title="Messaggi non letti">💬 ${x.unread}</span>` : ''}</b><small>${esc(x.address)}${capOf(x) ? ' · <span class="mono">'+esc(capOf(x))+'</span>' : ''}${area.on && !inArea(capOf(x)) ? ' · <span class="capout out">fuori area</span>' : ''}${x.failed ? ` · <span class="capout out">${x.failed} ${x.failed===1?'tentativo':'tentativi'} non riusciti</span>` : ''}${(x.cod||0) > 0 ? `<span class="tagx">contrassegno ${(x.cod).toLocaleString('it-IT',{style:'currency',currency:'EUR'})}</span>` : ''}${x.pickup ? '<span class="tagx pk">ritiro</span>' : ''}</small></span>
       <span class="when">${whenCell(x)}</span>
       <span class="pill s-${x.status}"><i class="dot"></i>${STATUS[x.status]}</span>
       <span class="acts">${rowActions(x)}</span>${rowPanel(x)}</div>`).join('');
@@ -975,8 +986,50 @@ function renderCust(){
     ${row('Proposta', prop)}${cur && cur !== prop ? row('Consegna', cur) : ''}</dl>`;
   box.hidden = false;
 }
+/* conversazione vera: messaggi scritti dal cliente e risposte dell'operatore */
+ui.conv = null;
+async function loadConv(id, quiet){
+  try {
+    const r = await api(`/deliveries/${id}/messages`);
+    if (ui.simId !== id) return;
+    ui.conv = {id, ...r};
+    const x = deliveries.find(d => d.id === id);
+    if (x && x.unread){ await api(`/deliveries/${id}/messages/read`, {method:'POST', body:{}}).catch(() => {}); x.unread = 0; renderList(); }
+    renderPhone();
+  } catch (e){ if (!quiet) toast(e.message); }
+}
+function convBubbles(x){
+  if (!ui.conv || ui.conv.id !== x.id) return '';
+  const own = ui.conv.messages.filter(m => (m.dir === 'in' && m.kind === 'text') || (m.dir === 'out' && m.kind === 'manual'));
+  if (!own.length) return '';
+  const t = m => new Date(m.at).toLocaleString('it-IT',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+  return '<div class="sysmsg">Messaggi scritti</div>' + own.map(m => m.dir === 'in'
+    ? `<div class="bub out in-text">${esc(m.text).replace(/\n/g,'<br>')}<time>${t(m)}</time></div>`
+    : `<div class="bub">${esc(m.text).replace(/\n/g,'<br>')}<time>${t(m)} · operatore</time></div>`).join('');
+}
+function renderReply(x){
+  const box = $('replyBox');
+  if (!x || !x.phone){ box.hidden = true; return; }
+  box.hidden = false;
+  const c = ui.conv && ui.conv.id === x.id ? ui.conv : null;
+  const until = c && c.replyUntil ? new Date(c.replyUntil) : null;
+  $('replyText').disabled = $('replyGo').disabled = !until;
+  $('replyInfo').innerHTML = !c ? 'Caricamento…' : until
+    ? `Puoi rispondere gratis fino a ${until.toLocaleString('it-IT',{weekday:'short',hour:'2-digit',minute:'2-digit'})} (24 ore dall'ultimo messaggio del cliente).`
+    : `Il cliente non ti ha scritto nelle ultime 24 ore: WhatsApp non permette di scrivergli liberamente. Chiamalo: <a href="tel:${esc(x.phone)}">${esc(x.phone)}</a>`;
+}
+$('replyGo').onclick = async () => {
+  const x = deliveries.find(d => d.id === ui.simId); if (!x) return;
+  const text = $('replyText').value.trim(); if (!text){ toast('Scrivi il messaggio'); return; }
+  $('replyGo').disabled = true;
+  try { await api(`/deliveries/${x.id}/reply`, {body:{text}}); $('replyText').value = ''; toast('Messaggio inviato'); await loadConv(x.id, true); }
+  catch (e){ toast(e.message); $('replyGo').disabled = false; }
+};
 function renderPhone(){
   renderCust();
+  { const cx = deliveries.find(d => d.id === ui.simId);
+    if (cx && (!ui.conv || ui.conv.id !== cx.id) && ui.convLoading !== cx.id){ ui.convLoading = cx.id; loadConv(cx.id, true).finally(() => { ui.convLoading = null; }); }
+    renderReply(cx); }
   const s = $('screen'), x = deliveries.find(d => d.id === ui.simId);
   const sbar = `<div class="sbar"><span>${nowTime()}</span><span>5G ▮▮▮</span></div>`;
   if (!x){ s.innerHTML = sbar + `<div class="mail"><p class="empty">Crea una consegna per vedere il messaggio che riceve il cliente.</p></div>`; return; }
@@ -1012,6 +1065,7 @@ function renderPhone(){
   if (x.status === 'riprogrammato') chat += `<div class="bub">${CONF('wa_rescheduled', x)}<time>${nowTime()}</time></div>`;
   if (x.status === 'consegnata') chat += `<div class="sysmsg">Consegna effettuata ✓</div>`;
   if (x.status === 'senza_risposta') chat += `<div class="sysmsg">Nessuna risposta dopo il sollecito: da contattare</div>`;
+  chat += convBubbles(x);
   s.innerHTML = sbar + `<div class="chead"><div class="avatar">✓</div><div><b>Servizio consegne</b><small>Per conto di ${esc(me?.tenant_name || '')}</small></div></div><div class="chat" id="chat">${chat}</div>`;
   const c = $('chat'); c.scrollTop = c.scrollHeight;
 }

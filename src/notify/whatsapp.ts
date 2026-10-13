@@ -96,6 +96,8 @@ export interface WaWebhook {
           button?: { payload?: string; text?: string };
           interactive?: { button_reply?: { id: string; title: string } };
           text?: { body: string };
+          image?: { caption?: string };
+          document?: { filename?: string };
         }[];
         statuses?: { id: string; status: string; errors?: unknown[] }[];
       };

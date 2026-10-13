@@ -6,13 +6,14 @@ import { answerPin, confirmDelivery, declineDelivery } from '../domain/deliverie
 import { verifySignature, type WaWebhook } from '../notify/whatsapp.js';
 import { enqueue } from '../jobs/queue.js';
 import { tenantsByPhoneNumberId } from '../domain/settings.js';
+import { findDeliveryForPhone, inboundText } from '../domain/inbox.js';
 
 /** Registra un messaggio in entrata; false se già visto (Meta può consegnare lo stesso evento più volte). */
-async function recordInbound(deliveryId: string | null, providerId: string, payload: unknown) {
+async function recordInbound(deliveryId: string | null, providerId: string, payload: unknown, kind: 'reply' | 'text', body: string) {
   const r = await pool.query(
-    `INSERT INTO messages (delivery_id, channel, direction, kind, provider_id, status, payload)
-     VALUES ($1, 'whatsapp', 'in', 'reply', $2, 'received', $3) ON CONFLICT (provider_id) DO NOTHING RETURNING id`,
-    [deliveryId, providerId, JSON.stringify(payload)],
+    `INSERT INTO messages (delivery_id, channel, direction, kind, provider_id, status, payload, body)
+     VALUES ($1, 'whatsapp', 'in', $4, $2, 'received', $3, $5) ON CONFLICT (provider_id) DO NOTHING RETURNING id`,
+    [deliveryId, providerId, JSON.stringify(payload), kind, body],
   );
   return r.rowCount === 1;
 }
@@ -69,10 +70,11 @@ export async function webhookRoutes(app: FastifyInstance) {
         const v = change.value ?? {};
         for (const msg of v.messages ?? []) {
           const payload = msg.button?.payload ?? msg.interactive?.button_reply?.id ?? null;
-          const deliveryId = payload ? /:(.+)$/.exec(payload)?.[1] ?? null : null;
-          if (!(await recordInbound(deliveryId, msg.id, msg))) continue; // duplicato
+          const fromPayload = payload ? /:([0-9a-f-]{36})$/i.exec(payload)?.[1] ?? null : null;
+          // pulsante: la consegna è nel payload; testo, foto, vocali: si cerca dal numero del cliente
+          const deliveryId = fromPayload ?? (await findDeliveryForPhone(pool, msg.from, v.metadata?.phone_number_id));
+          if (!(await recordInbound(deliveryId, msg.id, msg, fromPayload ? 'reply' : 'text', inboundText(msg)))) continue; // duplicato
           if (payload) await handleReply(payload);
-          // Testo libero del cliente: resta in "messages" e va mostrato all'operatore (TODO pannello)
         }
         for (const st of v.statuses ?? []) {
           await pool.query('UPDATE messages SET status = $2, updated_at = now() WHERE provider_id = $1', [st.id, st.status]);
