@@ -51,6 +51,36 @@ export async function superadminRoutes(app: FastifyInstance) {
     return { ok: true, phoneNumberId: next.phoneNumberId, hasToken: Boolean(next.token), hasSecret: Boolean(next.appSecret) };
   });
 
+  /**
+   * Attivazione del numero del cliente su Meta, dal pannello:
+   * request_code (SMS) → verify_code (codice ricevuto) → register (PIN a 6 cifre scelto da te).
+   * Mostra il messaggio di errore esatto di Meta.
+   */
+  app.post('/tenants/:id/whatsapp-activate', async (req) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const b = z.object({
+      step: z.enum(['request_code', 'verify_code', 'register']),
+      code: z.string().trim().regex(/^\d{6}$/, 'Il codice ha 6 cifre').optional(),
+      pin: z.string().trim().regex(/^\d{6}$/, 'Il PIN ha 6 cifre').optional(),
+    }).parse(req.body);
+    const cfg = await waConfigFor(id);
+    if (!cfg) throw new DomainError('wa_missing', "Prima salva l'ID del numero e un token (qui o nelle variabili di Render).", 422);
+    try {
+      if (b.step === 'request_code') await wa.numberApi(cfg, 'request_code', { code_method: 'SMS', language: 'it' });
+      else if (b.step === 'verify_code') {
+        if (!b.code) throw new DomainError('missing_code', 'Scrivi il codice ricevuto via SMS.', 422);
+        await wa.numberApi(cfg, 'verify_code', { code: b.code });
+      } else {
+        if (!b.pin) throw new DomainError('missing_pin', 'Scrivi il PIN a 6 cifre.', 422);
+        await wa.numberApi(cfg, 'register', { messaging_product: 'whatsapp', pin: b.pin });
+      }
+    } catch (err) {
+      if (err instanceof DomainError) throw err;
+      throw new DomainError('wa_failed', `Meta risponde: ${(err as Error).message}`, 422);
+    }
+    return { ok: true };
+  });
+
   /** Manda il modello di proposta a un numero di prova con il WhatsApp di questo cliente. */
   app.post('/tenants/:id/whatsapp-test', async (req) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(req.params);

@@ -68,6 +68,22 @@ export function sendButtons(c: WaConfig, to: string, body: string, buttons: { id
   });
 }
 
+/** Chiamata generica all'API del numero (registrazione, codice di verifica). Restituisce la risposta di Meta. */
+export async function numberApi(c: WaConfig, path: 'register' | 'request_code' | 'verify_code', body: Record<string, unknown>) {
+  const res = await fetch(`https://graph.facebook.com/${config.WHATSAPP_API_VERSION}/${c.phoneNumberId}/${path}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${c.token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const json = (await res.json().catch(() => ({}))) as { success?: boolean; error?: { message?: string; code?: number; error_user_msg?: string; error_data?: { details?: string } } };
+  if (!res.ok || json.error) {
+    const e = json.error ?? {};
+    const detail = e.error_user_msg || e.error_data?.details || e.message || `HTTP ${res.status}`;
+    throw new WhatsAppError(`${detail}${e.code ? ` (codice ${e.code})` : ''}`, false, json);
+  }
+  return json;
+}
+
 /** Testo libero: ammesso solo entro 24 ore dall'ultimo messaggio del cliente. */
 export function sendText(c: WaConfig, to: string, body: string) {
   return post(c, { to: toWaNumber(to), type: 'text', text: { body, preview_url: true } });

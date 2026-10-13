@@ -62,6 +62,9 @@ td a:hover{text-decoration:underline}
 dialog{border:1px solid var(--line);border-radius:14px;padding:0;background:var(--surface);color:var(--fg);width:min(560px,calc(100% - 32px));max-height:calc(100dvh - 32px)}
 fieldset.extras{border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin:0}
 fieldset.extras.wa{display:grid;gap:8px}
+.waact{border:1px dashed var(--line);border-radius:8px;padding:8px 10px;display:grid;gap:8px}
+.waact summary{cursor:pointer;font-weight:600;font-size:13px}
+.waact[open]{display:grid;gap:8px}
 fieldset.extras .hint{margin:0;font-size:12px;color:var(--muted)}
 .wachip{display:inline-block;margin-left:6px;font-size:11px;font-weight:600;padding:0 6px;border-radius:4px;background:var(--green-soft,#dcefe4);color:var(--green,#0b7a4b)}
 fieldset.extras legend{font-weight:600;font-size:13px;padding:0 4px}
@@ -170,6 +173,12 @@ label.f small{font-weight:400}
         <label class="f full">Token di accesso<input id="eWaTok" type="password" autocomplete="new-password" spellcheck="false"><small id="eWaTokHint">Solo se il numero è su un account Meta diverso dal tuo</small></label>
         <label class="f full">Chiave segreta dell'app (App secret)<input id="eWaSec" type="password" autocomplete="new-password" spellcheck="false"><small id="eWaSecHint">Solo se il numero è su un account Meta diverso dal tuo</small></label>
       </div>
+      <details class="waact"><summary>Attiva il numero su Meta (se risulta "In sospeso")</summary>
+        <p class="hint">Usa i dati salvati qui sopra (ID del numero e token). Prima premi <b>Salva</b>.</p>
+        <div class="inline"><button class="btn" type="button" data-wastep="request_code">1. Invia codice SMS</button><input id="eWaCode" class="search" style="flex:1" inputmode="numeric" maxlength="6" placeholder="Codice ricevuto via SMS"><button class="btn" type="button" data-wastep="verify_code">2. Conferma codice</button></div>
+        <div class="inline"><input id="eWaPin" class="search" style="flex:1" inputmode="numeric" maxlength="6" placeholder="PIN a 6 cifre scelto da te (annotalo)"><button class="btn primary" type="button" data-wastep="register">3. Registra il numero</button></div>
+        <p class="hint">Se il numero è già verificato puoi passare subito al punto 3.</p>
+      </details>
       <div class="inline"><input id="eWaTest" class="search" style="flex:1" inputmode="tel" placeholder="Il tuo cellulare per la prova" aria-label="Numero per la prova"><button class="btn" type="button" id="eWaTestGo">Invia messaggio di prova</button></div>
       <p class="hint" id="eWaMsg"></p>
     </fieldset>
@@ -308,6 +317,19 @@ function openEdit(id){
   $('eSlugTxt').textContent = t.slug; $('eDel').value = ''; $('eDelGo').disabled = true;
   $('dEdit').showModal();
 }
+document.querySelectorAll('[data-wastep]').forEach((b) => b.addEventListener('click', async () => {
+  const t = editing, msg = $('eWaMsg'), w = t.whatsapp || {}, step = b.dataset.wastep;
+  if ($('eWaId').value.trim() !== (w.phoneNumberId || '') || $('eWaTok').value){ msg.textContent = 'Prima premi Salva: l\'attivazione usa i dati salvati.'; return; }
+  const body = { step, code: $('eWaCode').value.trim() || undefined, pin: $('eWaPin').value.trim() || undefined };
+  b.disabled = true; msg.textContent = 'Richiesta a Meta in corso…';
+  try {
+    await api(`/tenants/${t.id}/whatsapp-activate`, { body });
+    msg.textContent = step === 'request_code' ? 'Codice inviato via SMS al numero: scrivilo e premi "2. Conferma codice".'
+      : step === 'verify_code' ? 'Codice confermato. Ora scegli un PIN a 6 cifre e premi "3. Registra il numero".'
+      : 'Numero registrato! Su WhatsApp Manager lo stato diventa "Connesso". Ora prova con "Invia messaggio di prova".';
+  } catch (ex) { msg.textContent = ex.message; }
+  b.disabled = false;
+}));
 $('eWaTestGo').addEventListener('click', async () => {
   const t = editing, msg = $('eWaMsg'), w = t.whatsapp || {};
   if ($('eWaId').value.trim() !== (w.phoneNumberId || '') || $('eWaTok').value || $('eWaSec').value){ msg.textContent = 'Prima premi Salva: la prova usa i dati salvati.'; return; }
