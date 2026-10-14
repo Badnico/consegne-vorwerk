@@ -7,7 +7,7 @@ import { fillText, getMessages, getWaSetting, type Messages } from '../domain/se
 import * as wa from './whatsapp.js';
 import { button, layout, para, sendEmail } from './email.js';
 
-type Kind = 'proposal' | 'reminder' | 'reschedule_link' | 'confirmation' | 'out_of_area' | 'pin_question';
+type Kind = 'proposal' | 'reminder' | 'reschedule_link' | 'confirmation' | 'out_of_area' | 'pin_question' | 'already_answered';
 
 export const formatEuro = (n: number) => n.toLocaleString('it-IT', { style: 'currency', currency: 'EUR' });
 
@@ -176,4 +176,28 @@ export async function sendPinQuestion(deliveryId: string) {
     () => sendEmail(sender(d), d.email!, t(m, 'mail_subject', v), `${t(m, 'wa_pin_question', v)}\n${url}\n`,
       layout(`<p><strong>${t(m, 'wa_pin_question', v)}</strong></p><p>${button(url, 'Rispondi')}</p>`)),
   );
+}
+
+/**
+ * Il cliente ha premuto un secondo pulsante (es. Sì dopo No): WhatsApp non permette di disattivarli,
+ * quindi la risposta viene ignorata e il cliente riceve un breve avviso (gratuito: siamo nelle 24 ore).
+ * Al massimo un avviso ogni 10 minuti per consegna, per non rispondere a ogni tocco.
+ */
+export async function sendAlreadyAnswered(deliveryId: string) {
+  const d = await getDelivery(pool, deliveryId);
+  if (!d.phone_e164) return;
+  const recent = await pool.query(
+    "SELECT 1 FROM messages WHERE delivery_id = $1 AND kind = 'already_answered' AND created_at > now() - interval '10 minutes'", [deliveryId]);
+  if (recent.rowCount) return;
+  const cfg = await waConfigFor(d.tenant_id);
+  if (!cfg) return;
+  const v = messageVars(d, 'current');
+  let text: string;
+  if (['confirmed', 'rescheduled', 'pin_check'].includes(d.status)) {
+    text = `Abbiamo già registrato la tua conferma${v.data ? ` per ${v.data}, ${v.fascia}` : ''}. Se hai bisogno di cambiare, scrivici qui.`;
+  } else if (['to_reschedule', 'out_of_area', 'no_response'].includes(d.status)) {
+    text = 'Abbiamo già registrato la tua risposta: un nostro operatore ti contatterà per concordare la consegna. Se vuoi, scrivici qui.';
+  } else return; // consegnata o annullata: nessun avviso
+  try { await record(d.id, 'whatsapp', 'already_answered', await wa.sendText(cfg, d.phone_e164, text), 'sent'); }
+  catch (err) { await record(d.id, 'whatsapp', 'already_answered', null, 'failed', { error: String(err) }); }
 }

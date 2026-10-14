@@ -64,7 +64,7 @@ export async function inboxSummary(db: Db, ids: string[]) {
 
 const OUT_LABEL: Record<string, string> = {
   proposal: 'Proposta di consegna', reminder: 'Sollecito', reschedule_link: 'Link per scegliere la data', confirmation: 'Conferma',
-  out_of_area: 'Messaggio fuori area', pin_question: 'Domanda sul PIN',
+  out_of_area: 'Messaggio fuori area', pin_question: 'Domanda sul PIN', already_answered: 'Avviso: risposta già registrata',
 };
 
 /** Conversazione di una consegna, dal più vecchio. */

@@ -7,6 +7,7 @@ import { verifySignature, type WaWebhook } from '../notify/whatsapp.js';
 import { enqueue } from '../jobs/queue.js';
 import { tenantsByPhoneNumberId } from '../domain/settings.js';
 import { findDeliveryForPhone, inboundText } from '../domain/inbox.js';
+import { sendAlreadyAnswered } from '../notify/notifier.js';
 
 /** Ultime chiamate di Meta per numero (in memoria): per capire dall'admin se le risposte arrivano. */
 export const webhookSeen = new Map<string, { at: string; ok: boolean }>();
@@ -40,8 +41,9 @@ async function handleReply(payload: string) {
       await enqueue.afterDecline(deliveryId);
     }
   } catch (err) {
-    // Risposta arrivata in uno stato che non la ammette (es. doppio tocco): si ignora, resta nel log
+    // Risposta arrivata in uno stato che non la ammette (es. Sì dopo No): si ignora e si avvisa il cliente
     if (!(err instanceof DomainError)) throw err;
+    await sendAlreadyAnswered(deliveryId).catch(() => {});
   }
   return deliveryId;
 }
