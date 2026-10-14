@@ -182,6 +182,8 @@ label.f small{font-weight:400}
       </details>
       <div class="inline"><input id="eWaTest" class="search" style="flex:1" inputmode="tel" placeholder="Il tuo cellulare per la prova" aria-label="Numero per la prova"><button class="btn" type="button" id="eWaTestGo">Invia messaggio di prova</button></div>
       <p class="hint" id="eWaMsg"></p>
+      <div class="inline"><button class="btn" type="button" id="eWaLink">Controlla e collega le risposte</button></div>
+      <p class="hint" id="eWaLinkMsg">Se il cliente preme Sì/No ma la consegna resta "In attesa", premi qui: collega il numero all'app che riceve le risposte e ti dice se arrivano.</p>
     </fieldset>
     <fieldset class="extras"><legend>Funzioni extra</legend>
       <label class="row" style="gap:8px"><input type="checkbox" id="eFAt"> Report Excel a orario fisso <small>(il cliente sceglie a che ora riceverlo ogni giorno)</small></label>
@@ -338,6 +340,23 @@ $('eWaTestGo').addEventListener('click', async () => {
   const btn = $('eWaTestGo'); btn.disabled = true; msg.textContent = 'Invio in corso…';
   try { const r = await api(`/tenants/${t.id}/whatsapp-test`, { body:{ to } }); msg.textContent = `Messaggio di prova inviato dal numero ${r.from === 'cliente' ? 'del cliente' : 'generale'}: controlla WhatsApp.`; }
   catch (ex) { msg.textContent = ex.message; }
+  btn.disabled = false;
+});
+$('eWaLink').addEventListener('click', async () => {
+  const t = editing, msg = $('eWaLinkMsg'), btn = $('eWaLink');
+  btn.disabled = true; msg.textContent = 'Controllo in corso…';
+  try {
+    const r = await api(`/tenants/${t.id}/whatsapp-link`, { body:{} });
+    const mine = r.wabas.filter(w => w.hasNumber);
+    const lines = [];
+    if (!mine.length) lines.push('⚠ Il numero non risulta in nessun account WhatsApp raggiungibile con questo token.');
+    for (const w of mine) lines.push(`✓ Account WhatsApp "${w.name || w.waba}" collegato all'app ${w.apps.join(', ') || r.app || ''}.`);
+    if (!r.hasSecret) lines.push('⚠ Manca la chiave segreta dell\'app (App secret): senza, le risposte vengono scartate.');
+    if (!r.seen) lines.push(`Nessuna risposta ricevuta da Meta per questo numero dall'ultimo riavvio. Controlla che su Meta for Developers → app ${r.app || ''} → WhatsApp → Configurazione l'URL del webhook sia ${r.base}/webhooks/whatsapp e che "messages" sia iscritto, poi rifai la prova.`);
+    else if (!r.seen.ok) lines.push(`✗ Meta ha mandato una risposta (${new Date(r.seen.at).toLocaleString('it-IT')}) ma la chiave segreta non corrisponde: inserisci in "App secret" la Chiave segreta dell'app ${r.app || ''} (Meta for Developers → Impostazioni app → Di base) e premi Salva.`);
+    else lines.push(`✓ Ultima risposta ricevuta e accettata: ${new Date(r.seen.at).toLocaleString('it-IT')}.`);
+    msg.textContent = lines.join(' ');
+  } catch (ex) { msg.textContent = ex.message; }
   btn.disabled = false;
 });
 $('eDel').addEventListener('input', () => { $('eDelGo').disabled = $('eDel').value.trim() !== editing?.slug; });

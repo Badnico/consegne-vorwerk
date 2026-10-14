@@ -84,6 +84,38 @@ export async function numberApi(c: WaConfig, path: 'register' | 'request_code' |
   return json;
 }
 
+async function graph(token: string, path: string, method: 'GET' | 'POST' = 'GET') {
+  const res = await fetch(`https://graph.facebook.com/${config.WHATSAPP_API_VERSION}/${path}`, { method, headers: { Authorization: `Bearer ${token}` } });
+  const json = (await res.json().catch(() => ({}))) as Record<string, any>;
+  if (!res.ok || json.error) {
+    const e = json.error ?? {};
+    throw new WhatsAppError(`${e.error_user_msg || e.message || `HTTP ${res.status}`}${e.code ? ` (codice ${e.code})` : ''}`, false, json);
+  }
+  return json;
+}
+
+/**
+ * Collega l'account WhatsApp (WABA) del numero all'app Meta che riceve le risposte.
+ * Trova gli account dal token (debug_token), li iscrive (subscribed_apps) e restituisce le app collegate.
+ */
+export async function linkWebhooks(c: WaConfig) {
+  const dbg = await graph(c.token, `debug_token?input_token=${encodeURIComponent(c.token)}`);
+  const d = dbg.data ?? {};
+  const wabas = new Set<string>();
+  for (const g of d.granular_scopes ?? []) if (String(g.scope).startsWith('whatsapp_business')) for (const id of g.target_ids ?? []) wabas.add(String(id));
+  if (!wabas.size) throw new WhatsAppError('Il token non dà accesso a nessun account WhatsApp: rigeneralo con i permessi whatsapp_business_management e whatsapp_business_messaging.', false, dbg);
+  const out: { waba: string; name?: string; hasNumber: boolean; apps: string[] }[] = [];
+  for (const w of wabas) {
+    const info = await graph(c.token, `${w}?fields=name`).catch(() => ({} as Record<string, any>));
+    const nums = await graph(c.token, `${w}/phone_numbers?fields=id`).catch(() => ({ data: [] } as Record<string, any>));
+    const hasNumber = (nums.data ?? []).some((n: { id: string }) => n.id === c.phoneNumberId);
+    if (hasNumber) await graph(c.token, `${w}/subscribed_apps`, 'POST');
+    const apps = await graph(c.token, `${w}/subscribed_apps`).catch(() => ({ data: [] } as Record<string, any>));
+    out.push({ waba: w, name: info.name, hasNumber, apps: (apps.data ?? []).map((a: any) => a.whatsapp_business_api_data?.name ?? a.name ?? a.id ?? 'app') });
+  }
+  return { appId: d.app_id as string | undefined, app: d.application as string | undefined, wabas: out };
+}
+
 /** Testo libero: ammesso solo entro 24 ore dall'ultimo messaggio del cliente. */
 export function sendText(c: WaConfig, to: string, body: string) {
   return post(c, { to: toWaNumber(to), type: 'text', text: { body, preview_url: true } });

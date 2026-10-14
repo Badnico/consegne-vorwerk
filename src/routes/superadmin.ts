@@ -10,6 +10,7 @@ import { waConfigFor } from '../notify/notifier.js';
 import * as wa from '../notify/whatsapp.js';
 import { normalizePhone } from '../domain/importer.js';
 import { createBackup } from '../domain/backup.js';
+import { webhookSeen } from './webhooks.js';
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Data non valida');
 
@@ -89,6 +90,18 @@ export async function superadminRoutes(app: FastifyInstance) {
       throw new DomainError('wa_failed', `Meta risponde: ${(err as Error).message}`, 422);
     }
     return { ok: true };
+  });
+
+  /** Controlla e collega le risposte (webhook) del numero del cliente. */
+  app.post('/tenants/:id/whatsapp-link', async (req) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const cfg = await waConfigFor(id);
+    if (!cfg) throw new DomainError('wa_missing', "Prima salva l'ID del numero e un token.", 422);
+    const w = await getWaSetting(pool, id);
+    let link;
+    try { link = await wa.linkWebhooks(cfg); }
+    catch (err) { throw new DomainError('wa_failed', `Meta risponde: ${(err as Error).message}`, 422); }
+    return { ...link, seen: webhookSeen.get(cfg.phoneNumberId) ?? null, hasSecret: Boolean(w.appSecret || config.WHATSAPP_APP_SECRET), base: config.PUBLIC_BASE_URL };
   });
 
   /** Manda il modello di proposta a un numero di prova con il WhatsApp di questo cliente. */

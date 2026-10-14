@@ -8,6 +8,9 @@ import { enqueue } from '../jobs/queue.js';
 import { tenantsByPhoneNumberId } from '../domain/settings.js';
 import { findDeliveryForPhone, inboundText } from '../domain/inbox.js';
 
+/** Ultime chiamate di Meta per numero (in memoria): per capire dall'admin se le risposte arrivano. */
+export const webhookSeen = new Map<string, { at: string; ok: boolean }>();
+
 /** Registra un messaggio in entrata; false se già visto (Meta può consegnare lo stesso evento più volte). */
 async function recordInbound(deliveryId: string | null, providerId: string, payload: unknown, kind: 'reply' | 'text', body: string) {
   const r = await pool.query(
@@ -63,7 +66,9 @@ export async function webhookRoutes(app: FastifyInstance) {
     // firma: con la chiave generale o, se il numero è di un cliente su un altro account Meta, con la sua
     const phoneId = body.entry?.[0]?.changes?.[0]?.value?.metadata?.phone_number_id;
     const secrets = [config.WHATSAPP_APP_SECRET, ...(phoneId ? (await tenantsByPhoneNumberId(pool, phoneId)).map((r) => r.value.appSecret) : [])];
-    if (!verifySignature(raw, req.headers['x-hub-signature-256'] as string | undefined, secrets)) return reply.code(401).send();
+    const okSig = verifySignature(raw, req.headers['x-hub-signature-256'] as string | undefined, secrets);
+    if (phoneId) webhookSeen.set(phoneId, { at: new Date().toISOString(), ok: okSig });
+    if (!okSig) { req.log.warn({ phoneId }, 'webhook WhatsApp con firma non valida: controlla la chiave segreta dell\'app (App secret)'); return reply.code(401).send(); }
 
     for (const entry of body.entry ?? []) {
       for (const change of entry.changes ?? []) {
