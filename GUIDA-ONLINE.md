@@ -132,6 +132,19 @@ Il primo messaggio (quello con i pulsanti Sì e No) deve essere un modello appro
 
 Non cambiare l'ordine delle variabili: il programma le riempie in quest'ordine. Il nome dell'azienda è quello scritto in **Nome dell'azienda** quando crei l'ambiente.
 
+## Backup
+
+**Dati (consegne, clienti, impostazioni, messaggi, report, utenti di tutti gli ambienti):**
+in **/admin** premi **Scarica backup**. Scarica un file `backup-consegne-AAAAMMGG-HHMM.json.gz`:
+conservalo su Google Drive o su una chiavetta. Fallo almeno una volta a settimana e prima di ogni aggiornamento importante.
+
+**Codice del sito:** è già salvato su GitHub; in più conserva lo zip del progetto.
+
+**Ripristino** (solo se il database va perso): crea un nuovo database su Render, avvia il sito una volta
+(crea le tabelle), poi da un computer con il progetto e `DATABASE_URL` del nuovo database:
+`npm install` e `npm run ripristina -- backup-consegne-....json.gz`.
+Attenzione: sostituisce tutti i dati del database indicato.
+
 ## Aggiornare il programma
 
 Quando ricevi una versione nuova, caricala di nuovo su GitHub nello stesso modo, sostituendo i file. Render la mette online da solo in pochi minuti. I dati nel database restano.

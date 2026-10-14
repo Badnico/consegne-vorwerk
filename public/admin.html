@@ -31,6 +31,7 @@ button,input{font:inherit;color:inherit}
 header{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;justify-content:space-between}
 header h1{font-size:22px}
 header p{margin:4px 0 0;color:var(--muted)}
+a.btn{text-decoration:none;color:inherit;display:inline-block}
 .btn{border:1px solid var(--line);background:var(--surface);border-radius:6px;padding:8px 14px;font-weight:600;cursor:pointer}
 .btn:hover{background:var(--sunk)}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
@@ -101,7 +102,7 @@ label.f small{font-weight:400}
 <div class="wrap">
   <header>
     <div><h1>Ambienti dei clienti</h1><p>Ogni ambiente ha il suo indirizzo, i suoi dati e il suo abbonamento.</p></div>
-    <div class="row"><button class="btn primary" id="newBtn" type="button">Nuovo ambiente</button><button class="btn" id="logout" type="button">Esci</button></div>
+    <div class="row"><button class="btn primary" id="newBtn" type="button">Nuovo ambiente</button><a class="btn" id="backupBtn" href="/api/admin/backup" download title="Scarica tutti i dati di tutti i clienti in un file">Scarica backup</a><button class="btn" id="logout" type="button">Esci</button></div>
   </header>
 
   <div class="summary" id="summary"></div>

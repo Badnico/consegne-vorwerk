@@ -9,6 +9,7 @@ import { getWaSetting, saveWaSetting } from '../domain/settings.js';
 import { waConfigFor } from '../notify/notifier.js';
 import * as wa from '../notify/whatsapp.js';
 import { normalizePhone } from '../domain/importer.js';
+import { createBackup } from '../domain/backup.js';
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Data non valida');
 
@@ -17,6 +18,15 @@ export async function superadminRoutes(app: FastifyInstance) {
   app.addHook('onRequest', async (req, reply) => {
     if (req.url.startsWith('/api/admin/login') || req.url.startsWith('/api/admin/logout')) return;
     return requireSuperadmin(req, reply);
+  });
+
+  /** Backup completo di tutti i dati (tutti i clienti) in un file da scaricare. */
+  app.get('/backup', async (_req, reply) => {
+    const b = await createBackup();
+    reply.header('Content-Type', 'application/gzip');
+    reply.header('Content-Disposition', `attachment; filename="${b.name}"`);
+    reply.header('Cache-Control', 'no-store');
+    return reply.send(b.file);
   });
 
   app.get('/tenants', async () => {

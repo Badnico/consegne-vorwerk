@@ -15,7 +15,8 @@
     "migrate": "tsx --env-file=.env src/lib/migrate.ts",
     "seed": "tsx --env-file=.env src/lib/seed.ts",
     "demo": "tsx --env-file=.env src/lib/demo.ts",
-    "test": "node --env-file-if-exists=.env --import tsx --test tests/*.test.ts"
+    "test": "node --env-file-if-exists=.env --import tsx --test tests/*.test.ts",
+    "ripristina": "tsx --env-file-if-exists=.env src/lib/restore.ts"
   },
   "dependencies": {
     "exceljs": "^4.4.0",

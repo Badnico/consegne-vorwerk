@@ -49,7 +49,9 @@ export async function sessionRoutes(app: FastifyInstance) {
     return html(reply).send(await page('admin.html'));
   });
   app.get('/admin/login', async (_req, reply) => html(reply).send(await page('login.html')));
-  app.get('/', async (_req, reply) => reply.redirect('/admin'));
+  // sito pubblico di SmartConsegne (serve anche a Meta per verificare l'azienda)
+  app.get('/', async (_req, reply) => html(reply).send(await page('sito.html')));
+  app.get('/privacy', async (_req, reply) => html(reply).send(await page('privacy.html')));
 
   /* ---------- ambienti dei clienti ---------- */
   app.post('/api/login', async (req, reply) => {

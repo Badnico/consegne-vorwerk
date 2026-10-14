@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SmartConsegne · Conferma delle consegne via WhatsApp · DVL Servizi S.R.L.</title>
+<meta name="description" content="SmartConsegne di DVL Servizi S.R.L.: il portale che conferma le consegne con i clienti via WhatsApp ed email, con riprogrammazione autonoma su fasce orarie.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;600;700;800&display=swap">
+<style>
+:root{--bg:#f3f5f3;--surface:#fff;--line:#d5ddd7;--fg:#18231d;--muted:#5d6b63;--accent:#0b7a4b;--accent-soft:#e3f1e9;--accent-fg:#fff;color-scheme:light}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 "Public Sans",system-ui,-apple-system,"Segoe UI",sans-serif}
+a{color:var(--accent)}
+.wrap{max-width:1040px;margin:0 auto;padding:0 20px}
+header{background:var(--surface);border-bottom:1px solid var(--line)}
+header .wrap{display:flex;align-items:center;justify-content:space-between;height:64px}
+.brand{font-weight:800;font-size:20px;letter-spacing:-.01em;color:var(--fg);text-decoration:none}
+.brand span{color:var(--accent)}
+.btn{display:inline-block;font-weight:700;text-decoration:none;border-radius:8px;padding:10px 18px;border:1px solid var(--accent)}
+.btn.primary{background:var(--accent);color:var(--accent-fg)}
+.btn.ghost{color:var(--accent);background:transparent}
+.hero{padding-top:72px;padding-bottom:56px}
+.hero h1{font-size:clamp(30px,5vw,46px);line-height:1.15;margin:0 0 16px;letter-spacing:-.02em;max-width:760px;text-wrap:balance}
+.hero p{font-size:19px;color:var(--muted);max-width:640px;margin:0 0 28px}
+.hero .cta{display:flex;gap:12px;flex-wrap:wrap}
+section{padding:48px 0}
+h2{font-size:28px;margin:0 0 8px;letter-spacing:-.01em}
+.lead{color:var(--muted);margin:0 0 28px;max-width:640px}
+.steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:16px;counter-reset:s}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:22px}
+.steps .card::before{counter-increment:s;content:counter(s);display:grid;place-items:center;width:34px;height:34px;border-radius:50%;background:var(--accent-soft);color:var(--accent);font-weight:800;margin-bottom:12px}
+.card h3{margin:0 0 6px;font-size:17px}
+.card p{margin:0;color:var(--muted);font-size:15px}
+.feat{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}
+.contact{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
+.contact dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:6px 16px}
+.contact dt{color:var(--muted)}
+.contact dd{margin:0;font-weight:600}
+footer{border-top:1px solid var(--line);background:var(--surface);padding:24px 0;font-size:14px;color:var(--muted)}
+footer .wrap{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <a class="brand" href="/">Smart<span>Consegne</span></a>
+    <a class="btn ghost" href="#contatti">Contattaci</a>
+  </div>
+</header>
+
+<main>
+  <div class="wrap hero">
+    <h1>Le consegne confermate dal cliente, prima di partire.</h1>
+    <p>SmartConsegne è il portale di DVL Servizi S.R.L. che chiede a ogni cliente, via WhatsApp o email, se sarà a casa nel giorno e nella fascia oraria della consegna. Chi non c'è sceglie da solo un'altra data.</p>
+    <div class="cta">
+      <a class="btn primary" href="#contatti">Richiedi una demo</a>
+      <a class="btn ghost" href="#come-funziona">Come funziona</a>
+    </div>
+  </div>
+
+  <section id="come-funziona">
+    <div class="wrap">
+      <h2>Come funziona</h2>
+      <p class="lead">Meno consegne a vuoto, meno telefonate, un calendario sempre aggiornato.</p>
+      <div class="steps">
+        <div class="card"><h3>Caricate le consegne</h3><p>Importate il file Excel del vostro gestionale: il portale assegna data e fascia oraria in base alle capienze.</p></div>
+        <div class="card"><h3>Il cliente risponde Sì o No</h3><p>Riceve un messaggio WhatsApp con prodotto, ordine, data e fascia, e conferma con un tocco.</p></div>
+        <div class="card"><h3>Chi non c'è sceglie un'altra data</h3><p>Vede solo le fasce con posti liberi e prenota da solo; voi trovate tutto già nel calendario.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>Cosa include</h2>
+      <p class="lead">Un portale web dedicato a ogni azienda, con assistenza inclusa.</p>
+      <div class="feat">
+        <div class="card"><h3>Messaggi WhatsApp ed email</h3><p>Conferma della consegna, promemoria per contrassegno e ritiro dell'usato, riepilogo con l'indirizzo.</p></div>
+        <div class="card"><h3>Fasce orarie e capienze</h3><p>Decidete giorni, fasce e numero massimo di consegne: il sistema non accetta prenotazioni oltre il limite.</p></div>
+        <div class="card"><h3>Area servita</h3><p>CAP, località e province escluse vengono gestite a parte e segnalate agli operatori.</p></div>
+        <div class="card"><h3>Messaggi dei clienti nel portale</h3><p>Le risposte scritte arrivano collegate alla consegna e si risponde direttamente dal pannello.</p></div>
+        <div class="card"><h3>Report Excel automatici</h3><p>Lo stato di tutte le consegne ogni tot ore o a un orario fisso, anche via email.</p></div>
+        <div class="card"><h3>Dati in Europa</h3><p>Servizio in cloud su server nell'Unione Europea, accesso protetto per ogni operatore.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="contatti">
+    <div class="wrap">
+      <h2>Contatti</h2>
+      <p class="lead">Scriveteci o chiamateci per una dimostrazione del portale.</p>
+      <div class="contact">
+        <div class="card">
+          <dl>
+            <dt>Telefono</dt><dd><a href="tel:+393895055685">+39 389 505 5685</a></dd>
+            <dt>Email</dt><dd><a href="mailto:info@smartconsegne.com">info@smartconsegne.com</a></dd>
+          </dl>
+        </div>
+        <div class="card">
+          <dl>
+            <dt>Società</dt><dd>DVL Servizi S.R.L.</dd>
+            <dt>Sede</dt><dd>Via Monte Rosa 91, 20149 Milano (MI)</dd>
+            <dt>P.IVA</dt><dd>14433180966</dd>
+          </dl>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>© 2026 DVL Servizi S.R.L. · Via Monte Rosa 91, 20149 Milano (MI) · P.IVA 14433180966</span>
+    <span><a href="/privacy">Privacy policy</a></span>
+  </div>
+</footer>
+</body>
+</html>

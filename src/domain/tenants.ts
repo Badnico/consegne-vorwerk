@@ -24,7 +24,7 @@ export interface TenantRow extends Tenant {
 }
 
 /** Indirizzi che non possono diventare nomi di ambiente perché usati dal sistema */
-const RESERVED = new Set(['admin', 'api', 'r', 'login', 'logout', 'health', 'webhooks', 'static', 'assets', 'public', 'app', 'www']);
+const RESERVED = new Set(['admin', 'api', 'r', 'login', 'logout', 'health', 'webhooks', 'static', 'assets', 'public', 'app', 'www', 'privacy']);
 
 export function slugify(name: string) {
   return name.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
