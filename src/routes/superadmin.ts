@@ -97,10 +97,14 @@ export async function superadminRoutes(app: FastifyInstance) {
     const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
     const cfg = await waConfigFor(id);
     if (!cfg) throw new DomainError('wa_missing', "Prima salva l'ID del numero e un token.", 422);
+    const { waba } = z.object({ waba: z.string().trim().regex(/^(\d{6,25})?$/, "L'ID dell'account WhatsApp è fatto solo di cifre").optional().default('') }).parse(req.body ?? {});
     const w = await getWaSetting(pool, id);
     let link;
-    try { link = await wa.linkWebhooks(cfg); }
-    catch (err) { throw new DomainError('wa_failed', `Meta risponde: ${(err as Error).message}`, 422); }
+    try { link = await wa.linkWebhooks(cfg, waba || undefined); }
+    catch (err) {
+      if ((err as Error).message === 'NEED_WABA') throw new DomainError('need_waba', "Scrivi l'ID dell'account WhatsApp nel campo accanto al tasto: lo trovi in WhatsApp Manager → in alto, sotto il nome dell'account (oppure Impostazioni dell'account WhatsApp → \"ID dell'account WhatsApp Business\"). Non è l'ID del numero.", 422);
+      throw new DomainError('wa_failed', `Meta risponde: ${(err as Error).message}`, 422);
+    }
     return { ...link, seen: webhookSeen.get(cfg.phoneNumberId) ?? null, hasSecret: Boolean(w.appSecret || config.WHATSAPP_APP_SECRET), base: config.PUBLIC_BASE_URL };
   });
 

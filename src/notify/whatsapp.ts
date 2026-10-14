@@ -98,12 +98,13 @@ async function graph(token: string, path: string, method: 'GET' | 'POST' = 'GET'
  * Collega l'account WhatsApp (WABA) del numero all'app Meta che riceve le risposte.
  * Trova gli account dal token (debug_token), li iscrive (subscribed_apps) e restituisce le app collegate.
  */
-export async function linkWebhooks(c: WaConfig) {
-  const dbg = await graph(c.token, `debug_token?input_token=${encodeURIComponent(c.token)}`);
+export async function linkWebhooks(c: WaConfig, wabaId?: string) {
+  const dbg = await graph(c.token, `debug_token?input_token=${encodeURIComponent(c.token)}`).catch(() => ({ data: {} } as Record<string, any>));
   const d = dbg.data ?? {};
   const wabas = new Set<string>();
-  for (const g of d.granular_scopes ?? []) if (String(g.scope).startsWith('whatsapp_business')) for (const id of g.target_ids ?? []) wabas.add(String(id));
-  if (!wabas.size) throw new WhatsAppError('Il token non dà accesso a nessun account WhatsApp: rigeneralo con i permessi whatsapp_business_management e whatsapp_business_messaging.', false, dbg);
+  if (wabaId) wabas.add(wabaId);
+  else for (const g of d.granular_scopes ?? []) if (String(g.scope).startsWith('whatsapp_business')) for (const id of g.target_ids ?? []) wabas.add(String(id));
+  if (!wabas.size) throw new WhatsAppError('NEED_WABA', false, dbg);
   const out: { waba: string; name?: string; hasNumber: boolean; apps: string[] }[] = [];
   for (const w of wabas) {
     const info = await graph(c.token, `${w}?fields=name`).catch(() => ({} as Record<string, any>));
