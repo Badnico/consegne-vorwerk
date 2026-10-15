@@ -180,7 +180,7 @@ export async function createReport(db: Db, tenantId: string, trigger: 'auto' | '
     [tenantId, KEEP],
   );
   if (trigger === 'auto') await saveReportState(db, tenantId, { lastAuto: new Date().toISOString() });
-  if (trigger === 'time') await saveReportState(db, tenantId, { lastTimeDay: todayLocal(config.TIMEZONE) });
+  if (trigger === 'time') await saveReportState(db, tenantId, { lastTimeDay: todayLocal(config.TIMEZONE), lastTimeAt: setting.at });
   console.log(`[report] creato (${trigger}) per ${t.name}${to ? ` → invio email a ${to}` : setting.email && trigger !== 'manual' && !emailEnabled() ? ' (email non configurata sul server)' : ''}`);
   if (to) {
     const c = rep.counts;
@@ -257,10 +257,15 @@ export async function dueAtTime(db: Db, tenantId: string, at: string, now = new 
   const toMin = (s: string) => +s.slice(0, 2) * 60 + +s.slice(3, 5);
   const late = toMin(localHHMM(now)) - toMin(at);
   if (late < 0 || late >= 120) return false;
-  if ((await getReportState(db, tenantId)).lastTimeDay === todayLocal(config.TIMEZONE)) return false; // già fatto oggi (anche se poi cancellato)
+  // una volta al giorno PER ORARIO: se l'orario viene cambiato, il nuovo vale già da oggi
+  const st = await getReportState(db, tenantId);
+  if (st.lastTimeDay === todayLocal(config.TIMEZONE) && st.lastTimeAt === at) return false; // già fatto (anche se poi cancellato)
+  // già creato oggi un report a orario fisso dopo l'orario impostato?
   const done = await db.query(
-    "SELECT 1 FROM reports WHERE tenant_id = $1 AND trigger = 'time' AND (created_at AT TIME ZONE $2)::date = $3::date",
-    [tenantId, config.TIMEZONE, todayLocal(config.TIMEZONE)],
+    `SELECT 1 FROM reports WHERE tenant_id = $1 AND trigger = 'time'
+        AND (created_at AT TIME ZONE $2)::date = $3::date
+        AND to_char(created_at AT TIME ZONE $2, 'HH24:MI') >= $4`,
+    [tenantId, config.TIMEZONE, todayLocal(config.TIMEZONE), at],
   );
   return !done.rowCount;
 }

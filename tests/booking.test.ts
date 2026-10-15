@@ -305,6 +305,20 @@ test('report a orario fisso: solo con la funzione attiva, una volta al giorno', 
   assert.equal((await listReports(pool, T2))[0]!.trigger, 'time');
   const later = localHHMM(new Date(now.getTime() + 3600_000));
   if (later > at) assert.equal(await dueAtTime(pool, T2, later), false); // orario non ancora arrivato
+  // orario cambiato nello stesso giorno: il nuovo orario vale già da oggi
+  if (localHHMM(now) >= '00:10') {
+    const changed = localHHMM(new Date(now.getTime() - 30_000));
+    if (changed !== at) {
+      await saveReportSetting(pool, T2, { hours: 0, email: false, to: '', at: changed });
+      // il report di prima è stato creato DOPO "changed"? allora conta già come fatto; altrimenti ne parte uno nuovo
+      assert.equal(await runDueReports(pool, [T2]), 0);
+    }
+    const earlier = localHHMM(new Date(now.getTime() - 5 * 60_000));
+    await pool.query("UPDATE reports SET created_at = now() - interval '10 minutes' WHERE tenant_id = $1 AND trigger = 'time'", [T2]);
+    await saveReportSetting(pool, T2, { hours: 0, email: false, to: '', at: earlier });
+    assert.equal(await runDueReports(pool, [T2]), 1); // nuovo orario dopo l'ultimo report: parte oggi
+    assert.equal(await runDueReports(pool, [T2]), 0); // e una sola volta
+  }
   await updateTenant(T2, { features: { reportAtTime: false } });
 });
 
