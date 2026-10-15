@@ -1,0 +1,40 @@
+# Ambiente di PROVA su Render: un secondo sito con il suo database, separato dal portale principale.
+# Pubblica il ramo "test" di GitHub: le modifiche si provano qui e solo dopo si portano su "main".
+# Si crea da Render → New → Blueprint, indicando come "Blueprint Path" questo file (render-test.yaml).
+# WhatsApp non è collegato: nessun messaggio parte verso clienti veri finché non lo configuri apposta.
+
+services:
+  - type: web
+    name: consegne-test
+    runtime: node
+    plan: free
+    region: frankfurt
+    branch: test
+    autoDeploy: true
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: TIMEZONE
+        value: Europe/Rome
+      - key: DATABASE_URL
+        fromDatabase:
+          name: consegne-test-db
+          property: connectionString
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: ADMIN_API_KEY
+        generateValue: true
+      - key: WHATSAPP_VERIFY_TOKEN
+        generateValue: true
+
+databases:
+  - name: consegne-test-db
+    plan: free
+    region: frankfurt
+    databaseName: consegne_test
+    user: consegne

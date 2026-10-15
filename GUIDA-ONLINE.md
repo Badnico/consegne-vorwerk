@@ -132,6 +132,17 @@ Il primo messaggio (quello con i pulsanti Sì e No) deve essere un modello appro
 
 Non cambiare l'ordine delle variabili: il programma le riempie in quest'ordine. Il nome dell'azienda è quello scritto in **Nome dell'azienda** quando crei l'ambiente.
 
+## Ambiente di prova (consegne-test)
+
+Un secondo sito, con il suo database, per provare le modifiche senza toccare il portale principale.
+
+- **Ramo "test" su GitHub** → si pubblica su **consegne-test** (indirizzo tipo `https://consegne-test-xxxx.onrender.com`).
+- **Ramo "main"** → resta il portale principale **consegne-pp81** / www.smartconsegne.com.
+- Le modifiche si caricano prima su "test"; quando vanno bene si portano su "main".
+- Il database di prova è separato e vuoto: crea un ambiente cliente di prova da `/admin`.
+- WhatsApp non è collegato: nessun messaggio arriva ai clienti veri. Per provarlo, metti nell'ambiente di prova un numero di test di Meta.
+- Il piano gratuito di Render si addormenta dopo 15 minuti senza visite (il primo caricamento impiega ~1 minuto) e il database gratuito scade dopo circa 30 giorni: per un uso lungo passa al piano a pagamento più piccolo.
+
 ## Backup
 
 **Dati (consegne, clienti, impostazioni, messaggi, report, utenti di tutti gli ambienti):**
