@@ -2,7 +2,9 @@ import nodemailer from 'nodemailer';
 import { config } from '../config.js';
 
 let transport: ReturnType<typeof nodemailer.createTransport> | null = null;
-const getTransport = () => (transport ??= nodemailer.createTransport(config.SMTP_URL));
+// tempi massimi: se il server di posta non risponde, l'errore compare nei log invece di bloccare la coda
+const withTimeouts = (url: string) => url + (url.includes('?') ? '&' : '?') + 'connectionTimeout=15000&greetingTimeout=15000&socketTimeout=30000';
+const getTransport = () => (transport ??= nodemailer.createTransport(withTimeouts(config.SMTP_URL)));
 
 export const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 /** Testo semplice → HTML: escape e a capo */

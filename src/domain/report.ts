@@ -181,6 +181,7 @@ export async function createReport(db: Db, tenantId: string, trigger: 'auto' | '
   );
   if (trigger === 'auto') await saveReportState(db, tenantId, { lastAuto: new Date().toISOString() });
   if (trigger === 'time') await saveReportState(db, tenantId, { lastTimeDay: todayLocal(config.TIMEZONE) });
+  console.log(`[report] creato (${trigger}) per ${t.name}${to ? ` → invio email a ${to}` : setting.email && trigger !== 'manual' && !emailEnabled() ? ' (email non configurata sul server)' : ''}`);
   if (to) {
     const c = rep.counts;
     const lines = `Da chiudere: ${c['Da chiudere']}\nDa confermare: ${c['Da confermare']}\nConfermate: ${c.Confermata}`;
@@ -189,6 +190,7 @@ export async function createReport(db: Db, tenantId: string, trigger: 'auto' | '
         `In allegato la situazione delle consegne di ${t.name} al ${rep.stamp}.\n\n${lines}\n`,
         layout(para(`In allegato la situazione delle consegne di ${t.name} al ${rep.stamp}.`) + `<p>${esc(lines).replace(/\n/g, '<br>')}</p>`),
         [{ filename: rep.filename, content: rep.buffer, contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }]);
+      console.log(`[report] email inviata a ${to}`);
     } catch (err) {
       console.error('[report] email non inviata', err);
       await db.query('UPDATE reports SET emailed_to = NULL WHERE id = $1', [ins.rows[0]!.id]);

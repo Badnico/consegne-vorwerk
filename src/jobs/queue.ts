@@ -59,7 +59,11 @@ export const enqueue = {
 function safe<T>(handler: (jobs: PgBoss.Job<T>[]) => Promise<void>) {
   return async (jobs: PgBoss.Job<T>[]) => {
     try { await handler(jobs); }
-    catch (err) { if (err instanceof DomainError && err.code === 'not_found') return; throw err; }
+    catch (err) {
+      if (err instanceof DomainError && err.code === 'not_found') return;
+      console.error('[coda] lavoro non riuscito, verrà ritentato:', err);
+      throw err;
+    }
   };
 }
 
@@ -114,10 +118,15 @@ async function registerWorkers(b: PgBoss) {
 
   // Report Excel: ogni minuto controlla quali ambienti hanno superato le ore impostate o l'orario fisso
   await b.work(Q.reports, async () => {
-    const gone = await purgeExpiredReports(pool);
-    if (gone) console.log(`[report] cancellati ${gone} report più vecchi di 48 ore`);
-    const n = await runDueReports(pool, await activeTenantIds(pool));
-    if (n) console.log(`[report] generati ${n} report`);
+    try {
+      const gone = await purgeExpiredReports(pool);
+      if (gone) console.log(`[report] cancellati ${gone} report più vecchi di 48 ore`);
+      const n = await runDueReports(pool, await activeTenantIds(pool));
+      if (n) console.log(`[report] generati ${n} report`);
+    } catch (err) {
+      console.error('[report] controllo periodico non riuscito:', err);
+      throw err;
+    }
   });
   await b.schedule(Q.reports, '* * * * *', {}, { tz: config.TIMEZONE });
 }
