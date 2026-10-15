@@ -61,14 +61,17 @@ function render() {
     return;
   }
   if (state.status === 'confirmed') {
-    app.innerHTML = head + '<div class="card"><p>' + txt(T.confirmed) + '</p><div class="row"><button id="chg">Cambia data</button></div></div>';
-    $('#chg').onclick = () => act('/decline'); return;
+    // confermata: nessun tasto per cambiare data (per modifiche il cliente scrive o chiama l'azienda)
+    app.innerHTML = head + '<div class="card"><p>' + txt(T.confirmed) + '</p></div>'; return;
+  }
+  if (state.status === 'rescheduled') {
+    app.innerHTML = head + '<div class="card"><p>' + txt(T.rescheduled) + '</p></div>'; return;
   }
   if (state.status === 'out_of_area') { app.innerHTML = head + '<div class="card"><p>' + txt(T.out_of_area) + '</p></div>'; return; }
   if (state.status === 'delivered') { app.innerHTML = head + '<div class="card"><p class="when">Consegna effettuata ✓</p></div>'; return; }
   if (state.status === 'cancelled') { app.innerHTML = head + '<div class="card"><p>Questa consegna non è più modificabile.</p></div>'; return; }
-  // to_reschedule, rescheduled, no_response: scelta dello slot
-  const cur = state.slot && state.status === 'rescheduled' ? '<div class="card"><p>' + txt(T.rescheduled) + '</p></div>' : '';
+  // to_reschedule, no_response: scelta dello slot
+  const cur = '';
   let list = '<p class="muted">Caricamento delle fasce disponibili…</p>';
   if (avail) {
     const days = {};
@@ -94,7 +97,7 @@ async function act(path, body) {
   busy = true; showErr('');
   try {
     state = await api(path, body || {}); // sempre POST, anche senza dati (Sì / No)
-    if (['to_reschedule', 'rescheduled', 'no_response'].includes(state.status)) { await loadAvail(); startStream(); }
+    if (['to_reschedule', 'no_response'].includes(state.status)) { await loadAvail(); startStream(); }
   } catch (e) { const p = document.createElement('p'); p.className = 'err'; p.textContent = e.message; $('#app').append(p); }
   busy = false; pick = null; render();
 }
@@ -108,6 +111,6 @@ function startStream() {
   es.addEventListener('slots', () => { clearTimeout(t); t = setTimeout(loadAvail, 250); });
 }
 render();
-if (state && ['to_reschedule', 'rescheduled', 'no_response'].includes(state.status)) { loadAvail(); startStream(); }
+if (state && ['to_reschedule', 'no_response'].includes(state.status)) { loadAvail(); startStream(); }
 </script></body></html>`;
 }
