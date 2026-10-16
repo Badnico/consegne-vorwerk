@@ -62,6 +62,17 @@ export async function superadminRoutes(app: FastifyInstance) {
     return { ok: true, phoneNumberId: next.phoneNumberId, hasToken: Boolean(next.token), hasSecret: Boolean(next.appSecret) };
   });
 
+  /** Copia la configurazione WhatsApp (numero, token, chiave, modello) da un altro ambiente: il token resta sul server. */
+  app.post('/tenants/:id/whatsapp-copy', async (req) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const { from } = z.object({ from: z.string().uuid() }).parse(req.body);
+    if (from === id) throw new DomainError('same_tenant', "Scegli un ambiente diverso da questo.", 422);
+    const src = await getWaSetting(pool, from);
+    if (!src.phoneNumberId) throw new DomainError('wa_missing', "L'ambiente scelto non ha un numero WhatsApp configurato.", 422);
+    await saveWaSetting(pool, id, { ...src });
+    return { ok: true, phoneNumberId: src.phoneNumberId, template: src.template, lang: src.lang, hasToken: Boolean(src.token), hasSecret: Boolean(src.appSecret) };
+  });
+
   /**
    * Attivazione del numero del cliente su Meta, dal pannello:
    * request_code (SMS) → verify_code (codice ricevuto) → register (PIN a 6 cifre scelto da te).

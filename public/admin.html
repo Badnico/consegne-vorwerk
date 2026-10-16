@@ -168,6 +168,8 @@ label.f small{font-weight:400}
     <div class="row"><label class="row" style="gap:8px;font-weight:600"><input type="checkbox" id="eSusp"> Sospendi l'accesso (indipendentemente dalla scadenza)</label></div>
     <fieldset class="extras wa"><legend>WhatsApp del cliente</legend>
       <p class="hint">Lascia vuoto per mandare i messaggi dal <b>numero generale</b>. Se il cliente ha un numero suo collegato a Meta, inserisci qui i dati: i messaggi di questo cliente partiranno da quel numero.</p>
+      <div class="inline" id="eWaCopyRow"><select id="eWaFrom" class="search" style="flex:1" aria-label="Ambiente da cui copiare"></select><button class="btn" type="button" id="eWaCopy">Copia WhatsApp da questo ambiente</button></div>
+      <p class="hint" id="eWaCopyMsg">Per usare lo stesso numero di un altro ambiente: copia numero, token, chiave segreta e modello senza doverli reinserire.</p>
       <div class="fields">
         <label class="f">ID del numero di telefono<input id="eWaId" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="es. 123456789012345"><small>Meta → la tua app → WhatsApp → Configurazione API</small></label>
         <label class="f">Nome del modello<input id="eWaTpl" autocomplete="off" spellcheck="false" placeholder="consegna_proposta"><small>Vuoto = consegna_proposta</small></label>
@@ -317,6 +319,9 @@ function openEdit(id){
   $('eWaId').value = w.phoneNumberId || ''; $('eWaTpl').value = w.template || ''; $('eWaTok').value = ''; $('eWaSec').value = ''; $('eWaTest').value = ''; $('eWaMsg').textContent = '';
   $('eWaTok').placeholder = w.hasToken ? 'Salvato ✓ — lascia vuoto per non cambiarlo' : 'Vuoto = usa il tuo token generale';
   $('eWaSec').placeholder = w.hasSecret ? 'Salvata ✓ — lascia vuoto per non cambiarla' : 'Vuoto = usa la tua chiave generale';
+  const srcs = data.tenants.filter((x) => x.id !== t.id && (x.whatsapp || {}).phoneNumberId);
+  $('eWaFrom').innerHTML = srcs.map((x) => `<option value="${x.id}">${esc(x.name)} · numero ${esc(x.whatsapp.phoneNumberId)}</option>`).join('');
+  $('eWaCopyRow').hidden = $('eWaCopyMsg').hidden = !srcs.length;
   $('eSlugTxt').textContent = t.slug; $('eDel').value = ''; $('eDelGo').disabled = true;
   $('dEdit').showModal();
 }
@@ -333,6 +338,22 @@ document.querySelectorAll('[data-wastep]').forEach((b) => b.addEventListener('cl
   } catch (ex) { msg.textContent = ex.message; }
   b.disabled = false;
 }));
+$('eWaCopy').addEventListener('click', async () => {
+  const t = editing, from = $('eWaFrom').value, msg = $('eWaCopyMsg'), btn = $('eWaCopy');
+  if (!from) return;
+  const src = data.tenants.find((x) => x.id === from);
+  btn.disabled = true; msg.textContent = 'Copia in corso…';
+  try {
+    const r = await api(`/tenants/${t.id}/whatsapp-copy`, { body:{ from } });
+    t.whatsapp = { phoneNumberId: r.phoneNumberId, template: r.template, lang: r.lang, hasToken: r.hasToken, hasSecret: r.hasSecret };
+    $('eWaId').value = r.phoneNumberId; $('eWaTpl').value = r.template || ''; $('eWaTok').value = ''; $('eWaSec').value = '';
+    $('eWaTok').placeholder = r.hasToken ? 'Salvato ✓ — lascia vuoto per non cambiarlo' : 'Vuoto = usa il tuo token generale';
+    $('eWaSec').placeholder = r.hasSecret ? 'Salvata ✓ — lascia vuoto per non cambiarla' : 'Vuoto = usa la tua chiave generale';
+    msg.textContent = `Copiato da ${src ? src.name : 'altro ambiente'}: ora prova con "Invia messaggio di prova".`;
+    load();
+  } catch (ex) { msg.textContent = ex.message; }
+  btn.disabled = false;
+});
 $('eWaTestGo').addEventListener('click', async () => {
   const t = editing, msg = $('eWaMsg'), w = t.whatsapp || {};
   if ($('eWaId').value.trim() !== (w.phoneNumberId || '') || $('eWaTok').value || $('eWaSec').value){ msg.textContent = 'Prima premi Salva: la prova usa i dati salvati.'; return; }
