@@ -513,3 +513,28 @@ test('tempi del sollecito: ogni azienda ha i suoi, gli altri restano sui valori 
   assert.deepEqual(await getTiming(pool, T), { reminderHours: 0, noResponseHours: 12 });
   assert.equal((await getTiming(pool, T2)).reminderHours, config.REMINDER_AFTER_HOURS);
 });
+
+test('sollecito e "Senza risposta" seguono i tempi attuali, anche per consegne già proposte', async () => {
+  const { dueTimers, claimReminder, reminderStillDue } = await import('../src/domain/timing.js');
+  const { markNoResponse } = await import('../src/domain/deliveries.js');
+  const s = await slot('00:30', 5);
+  const a = await createDelivery(T, { order_ref: order(), customer, address: 'Via Padova 2, Milano', slot_id: s }, 'test');
+  await pool.query(`UPDATE deliveries SET created_at = now() - interval '90 minutes' WHERE id = $1`, [a]); // proposta un'ora e mezza fa
+  let r = await dueTimers(pool, T, { reminderHours: 24, noResponseHours: 48 });
+  assert.ok(!r.remind.includes(a) && !r.expire.includes(a));
+  r = await dueTimers(pool, T, { reminderHours: 1, noResponseHours: 2 }); // l'azienda accorcia i tempi dopo la proposta
+  assert.ok(r.remind.includes(a) && !r.expire.includes(a));
+  assert.equal(await reminderStillDue(pool, a, { reminderHours: 1, noResponseHours: 2 }), true);
+  assert.equal(await claimReminder(pool, a), true);
+  assert.equal(await claimReminder(pool, a), false); // un solo sollecito
+  r = await dueTimers(pool, T, { reminderHours: 0, noResponseHours: 1 });
+  assert.ok(r.expire.includes(a));
+  await markNoResponse(a);
+  assert.equal((await getDelivery(pool, a)).status, 'no_response');
+  // chi ha detto No e non sceglie la data: conta dal No
+  const b = await createDelivery(T, { order_ref: order(), customer, address: 'Via Padova 3, Milano', slot_id: s }, 'test');
+  assert.equal(await declineDelivery(b, 'customer'), 'to_reschedule');
+  await pool.query(`UPDATE delivery_events SET created_at = now() - interval '3 hours' WHERE delivery_id = $1 AND to_status = 'to_reschedule'`, [b]);
+  r = await dueTimers(pool, T, { reminderHours: 1, noResponseHours: 2 });
+  assert.ok(r.expire.includes(b) && !r.remind.includes(b));
+});

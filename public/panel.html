@@ -707,15 +707,18 @@ let msgs = {...MSG_DEFAULT}, msgDraft = null, msgFocus = null, flow = {askPin:tr
 function timingNote(r, n){ return r > 0 ? `Il cliente che non risponde riceve il sollecito dopo ${r} ${r===1?'ora':'ore'}; dopo ${n} ore dalla proposta la consegna diventa "Senza risposta". Il sollecito su WhatsApp costa come la proposta.` : `Nessun sollecito: dopo ${n} ore dalla proposta la consegna diventa "Senza risposta".`; }
 function renderTiming(t){ $('tmRem').value = t.reminderHours; $('tmNo').value = t.noResponseHours; $('tmNote').textContent = timingNote(t.reminderHours, t.noResponseHours); }
 ['tmRem','tmNo'].forEach(id => $(id).addEventListener('input', () => { ui.tmDirty = true; const r = +$('tmRem').value || 0, n = +$('tmNo').value || 0; $('tmNote').textContent = timingNote(r, n) + ' (non ancora salvato)'; }));
-$('saveTiming').addEventListener('click', async () => {
+async function saveTiming(){
   const err = $('tmErr'); err.hidden = true;
   const r = Number($('tmRem').value), n = Number($('tmNo').value);
   if (!Number.isInteger(r) || r < 0 || r > 168) { err.textContent = 'Sollecito: un numero intero di ore da 0 a 168.'; err.hidden = false; return; }
   if (!Number.isInteger(n) || n < 1 || n > 336) { err.textContent = '"Senza risposta": un numero intero di ore da 1 a 336.'; err.hidden = false; return; }
   if (r > 0 && n <= r) { err.textContent = '"Senza risposta" deve venire dopo il sollecito: metti più ore del sollecito.'; err.hidden = false; return; }
-  try { const t = await api('/timing', {method:'PUT', body:{reminderHours:r, noResponseHours:n}}); ui.tmDirty = false; renderTiming(t); toast('Tempi salvati: valgono per le nuove proposte'); }
+  try { const t = await api('/timing', {method:'PUT', body:{reminderHours:r, noResponseHours:n}}); ui.tmDirty = false; renderTiming(t); toast('Tempi salvati: valgono subito, anche per le consegne già proposte'); }
   catch (ex) { err.textContent = ex.message; err.hidden = false; }
-});
+}
+$('saveTiming').addEventListener('click', saveTiming);
+// si salva da solo appena esci dal campo (o premi Invio), senza dover cercare il pulsante
+['tmRem','tmNo'].forEach(id => $(id).addEventListener('change', () => { if (ui.tmDirty) saveTiming(); }));
 $('flowPin').addEventListener('change', async e => {
   try { flow = await api('/flow', {method:'PUT', body:{askPin: e.target.checked}}); toast(flow.askPin ? 'Dopo il Sì verrà chiesto se ha ricevuto il PIN' : 'Domanda sul PIN spenta: il Sì conferma subito'); renderPhone(); }
   catch (err){ e.target.checked = !e.target.checked; toast(err.message); }
@@ -814,6 +817,7 @@ $('defMsg').onclick = () => {
   msgDraft = validateMsgs().d; renderPhone(); toast('Testi predefiniti caricati: premi Salva per applicarli');
 };
 $('saveMsg').onclick = async () => {
+  if (ui.tmDirty) await saveTiming(); // anche i tempi del sollecito, se modificati
   const {d, bad} = validateMsgs(); if (bad) return;
   const btn = $('saveMsg'); btn.disabled = true;
   try {

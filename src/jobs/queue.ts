@@ -2,7 +2,8 @@ import PgBoss from 'pg-boss';
 import { config } from '../config.js';
 import { DomainError } from '../lib/errors.js';
 import { pool } from '../lib/db.js';
-import { getDelivery, incrementReminders, markNoResponse, type Status } from '../domain/deliveries.js';
+import { getDelivery, markNoResponse, type Status } from '../domain/deliveries.js';
+import { claimReminder, dueTimers, releaseReminder, reminderStillDue } from '../domain/timing.js';
 import { activeTenantIds, generateSlots } from '../domain/slots.js';
 import { purgeExpiredReports, runDueReports } from '../domain/report.js';
 import { getTiming } from '../domain/settings.js';
@@ -21,6 +22,7 @@ export const Q = {
   slots: 'generate-slots',
   reports: 'periodic-reports',
   askPin: 'ask-pin',
+  timers: 'reminder-timers',
 } as const;
 
 type IdJob = { deliveryId: string };
@@ -41,7 +43,6 @@ export async function stopQueue() {
   await boss?.stop({ graceful: true });
 }
 
-const hours = (h: number) => Math.round(h * 3600);
 const retry = { retryLimit: 5, retryDelay: 60, retryBackoff: true };
 
 function q() {
@@ -72,21 +73,18 @@ async function registerWorkers(b: PgBoss) {
   await b.work<IdJob>(Q.proposal, safe(async ([job]) => {
     const id = job!.data.deliveryId;
     await sendProposal(id, 'proposal');
-    // tempi scelti dall'azienda (scheda Messaggi): sollecito, oppure nessun sollecito e solo la scadenza
-    const tm = await getTiming(pool, (await getDelivery(pool, id)).tenant_id);
-    if (tm.reminderHours > 0) await b.send(Q.reminder, { deliveryId: id }, { ...retry, startAfter: hours(tm.reminderHours) });
-    else await b.send(Q.expire, { deliveryId: id, ifStatus: 'proposed' } satisfies ExpireJob, { startAfter: hours(tm.noResponseHours) });
+    // sollecito e "Senza risposta" li gestisce il controllo di ogni minuto (Q.timers) con i tempi attuali dell'azienda
   }));
 
   await b.work<IdJob>(Q.reminder, safe(async ([job]) => {
     const id = job!.data.deliveryId;
     const d = await getDelivery(pool, id);
     if (d.status !== 'proposed') return;
-    await sendProposal(id, 'reminder');
-    await incrementReminders(id);
-    const tm = await getTiming(pool, d.tenant_id);
-    const wait = Math.max(tm.noResponseHours - tm.reminderHours, 1);
-    await b.send(Q.expire, { deliveryId: id, ifStatus: 'proposed' } satisfies ExpireJob, { startAfter: hours(wait) });
+    // i lavori messi in coda prima di un cambio dei tempi seguono comunque i tempi attuali
+    if (!(await reminderStillDue(pool, id, await getTiming(pool, d.tenant_id)))) return;
+    if (!(await claimReminder(pool, id))) return; // già inviato
+    try { await sendProposal(id, 'reminder'); }
+    catch (err) { await releaseReminder(pool, id); throw err; } // invio fallito: si ritenta
   }));
 
   await b.work<IdJob>(Q.afterDecline, safe(async ([job]) => {
@@ -95,8 +93,6 @@ async function registerWorkers(b: PgBoss) {
     if (d.status === 'out_of_area') { await sendOutOfArea(id); return; } // ci pensa l'operatore
     if (d.status !== 'to_reschedule') return;
     await sendRescheduleLink(id);
-    const tm = await getTiming(pool, d.tenant_id);
-    await b.send(Q.expire, { deliveryId: id, ifStatus: 'to_reschedule' } satisfies ExpireJob, { startAfter: hours(tm.noResponseHours) });
   }));
 
   await b.work<IdJob>(Q.afterConfirm, safe(async ([job]) => {
@@ -107,12 +103,28 @@ async function registerWorkers(b: PgBoss) {
     await sendPinQuestion(job!.data.deliveryId);
   }));
 
-  // Scade solo se la consegna è ancora nello stato in cui era quando il job è stato creato
-  await b.work<ExpireJob>(Q.expire, safe(async ([job]) => {
-    const { deliveryId, ifStatus } = job!.data;
-    const d = await getDelivery(pool, deliveryId);
-    if (d.status === ifStatus) await markNoResponse(deliveryId);
-  }));
+  // Vecchie scadenze messe in coda con i tempi fissi: ora decide il controllo di ogni minuto
+  await b.work<ExpireJob>(Q.expire, async () => {});
+
+  // Ogni minuto: solleciti e "Senza risposta" con i tempi attuali di ogni azienda (scheda Messaggi)
+  await b.work(Q.timers, async () => {
+    try {
+      let sent = 0, expired = 0;
+      for (const t of await activeTenantIds(pool)) {
+        const { remind, expire } = await dueTimers(pool, t, await getTiming(pool, t));
+        for (const id of remind) if (await b.send(Q.reminder, { deliveryId: id }, { ...retry, singletonKey: `reminder:${id}` })) sent++;
+        for (const id of expire) {
+          try { await markNoResponse(id); expired++; }
+          catch (err) { if (!(err instanceof DomainError)) throw err; } // nel frattempo il cliente ha risposto
+        }
+      }
+      if (sent || expired) console.log(`[solleciti] ${sent} solleciti in invio, ${expired} consegne senza risposta`);
+    } catch (err) {
+      console.error('[solleciti] controllo non riuscito:', err);
+      throw err;
+    }
+  });
+  await b.schedule(Q.timers, '* * * * *', {}, { tz: config.TIMEZONE });
 
   await b.work(Q.slots, async () => {
     for (const t of await activeTenantIds(pool)) {
