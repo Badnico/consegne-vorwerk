@@ -26,6 +26,7 @@ export interface DeliveryView {
   province: string | null;
   cod_amount: string; // numeric da Postgres
   pickup: boolean;
+  both_channels: boolean;
   source: { h: string; v: unknown }[] | null;
   product: string | null;
   customer_id: string;
@@ -59,10 +60,11 @@ export interface NewDelivery {
   cod_amount?: number;
   pickup?: boolean;
   source?: { h: string; v: unknown }[] | null;
+  both_channels?: boolean;
 }
 
 const VIEW_SQL = `
-  SELECT d.id, d.tenant_id, t.name AS tenant_name, t.email AS tenant_email, d.order_ref, d.status, d.address, d.cap, d.city, d.province, d.cod_amount, d.pickup, d.source, d.product, d.customer_id, d.slot_id, d.proposed_slot_id,
+  SELECT d.id, d.tenant_id, t.name AS tenant_name, t.email AS tenant_email, d.order_ref, d.status, d.address, d.cap, d.city, d.province, d.cod_amount, d.pickup, d.both_channels, d.source, d.product, d.customer_id, d.slot_id, d.proposed_slot_id,
          d.reminders_sent, d.failed_attempts, d.delivered_at, d.created_at,
          c.name AS customer_name, c.phone_e164, c.email, c.consent_whatsapp,
          s.date, s.start_time, s.end_time,
@@ -132,11 +134,11 @@ export async function createDelivery(tenantId: string, input: NewDelivery, actor
       [input.customer.name, input.customer.phone_e164 ?? null, input.customer.email ?? null, input.customer.consent_whatsapp ?? false, tenantId],
     );
     const d = await c.query<{ id: string }>(
-      `INSERT INTO deliveries (tenant_id, order_ref, customer_id, address, cap, product, slot_id, proposed_slot_id, status, city, province, cod_amount, pickup, source)
-       VALUES ($7, $1, $2, $3, $4, $5, $13, $6, $14, $8, $9, $10, $11, $12) RETURNING id`,
+      `INSERT INTO deliveries (tenant_id, order_ref, customer_id, address, cap, product, slot_id, proposed_slot_id, status, city, province, cod_amount, pickup, source, both_channels)
+       VALUES ($7, $1, $2, $3, $4, $5, $13, $6, $14, $8, $9, $10, $11, $12, $15) RETURNING id`,
       [input.order_ref, cust.rows[0]!.id, input.address, input.cap ?? null, input.product ?? null, slot.id, tenantId,
         input.city ?? null, input.province ?? null, input.cod_amount ?? 0, input.pickup ?? false, input.source ? JSON.stringify(input.source) : null,
-        notSent ? null : slot.id, notSent ? 'out_of_area' : 'proposed'],
+        notSent ? null : slot.id, notSent ? 'out_of_area' : 'proposed', input.both_channels ?? false],
     );
     const id = d.rows[0]!.id;
     await logEvent(c, id, null, notSent ? 'out_of_area' : 'proposed', actor, notSent ? `Primo messaggio non inviato (escluso: ${notSent})` : undefined);

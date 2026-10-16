@@ -64,9 +64,22 @@ export async function waConfigFor(tenantId: string): Promise<wa.WaConfig | null>
 
 const canEmail = (d: DeliveryView) => emailEnabled() && Boolean(d.email);
 
-/** Prova WhatsApp, poi email. Lancia se nessun canale riesce, così la coda ritenta. */
+/**
+ * Prova WhatsApp, poi email. Lancia se nessun canale riesce, così la coda ritenta.
+ * Con "sia WhatsApp sia email" (both_channels) manda su entrambi i canali disponibili: basta che uno riesca.
+ */
 async function deliver(d: DeliveryView, kind: Kind, viaWa: ((c: wa.WaConfig) => Promise<string>) | null, viaMail: () => Promise<string>) {
   const cfg = viaWa && d.phone_e164 && d.consent_whatsapp ? await waConfigFor(d.tenant_id) : null;
+  if (d.both_channels && cfg && canEmail(d)) {
+    let sent: 'whatsapp' | 'email' | null = null;
+    let lastErr: unknown = null;
+    try { await record(d.id, 'whatsapp', kind, await viaWa!(cfg), 'sent'); sent = 'whatsapp'; }
+    catch (err) { lastErr = err; await record(d.id, 'whatsapp', kind, null, 'failed', { error: String(err) }); }
+    try { await record(d.id, 'email', kind, await viaMail(), 'sent'); sent ??= 'email'; }
+    catch (err) { lastErr = err; await record(d.id, 'email', kind, null, 'failed', { error: String(err) }); }
+    if (!sent) throw lastErr;
+    return sent;
+  }
   if (viaWa && cfg) {
     try {
       await record(d.id, 'whatsapp', kind, await viaWa(cfg), 'sent');

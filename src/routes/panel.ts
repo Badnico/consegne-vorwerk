@@ -136,6 +136,7 @@ export async function panelRoutes(app: FastifyInstance) {
       product: z.string().trim().max(120).optional().default(''),
       date: isoDate,
       bandId: z.string().regex(/^\d{2}:\d{2}-\d{2}:\d{2}$/),
+      bothChannels: z.boolean().optional().default(false),
     }).parse(req.body);
     if (!b.phone && !b.email) throw new DomainError('missing_contact', 'Serve almeno un contatto: WhatsApp o email.', 422);
     if (b.email && !z.string().email().safeParse(b.email).success) throw new DomainError('invalid_email', 'Email non valida.', 422);
@@ -146,7 +147,7 @@ export async function panelRoutes(app: FastifyInstance) {
       order_ref: await newOrderRef(t),
       customer: { name: b.name, phone_e164: phone, email: b.email || null, consent_whatsapp: Boolean(phone) },
       address: b.address, cap: b.cap, product: b.product || null,
-      slot_id: await slotIdFor(t, b.date, b.bandId),
+      slot_id: await slotIdFor(t, b.date, b.bandId), both_channels: b.bothChannels,
     }, actorOf(req), { notSent: excluded ?? undefined });
     if (!excluded) await enqueue.proposal(id);
     return reply.code(201).send(toPanel(await getDelivery(pool, id)));
@@ -327,7 +328,7 @@ export async function panelRoutes(app: FastifyInstance) {
       source: z.array(z.object({ h: z.string().max(200), v: z.unknown() })).max(200).default([]),
       date: isoDate.nullable(), band: time.nullable(),
     }).refine((r) => r.phone || r.email, 'Serve almeno un contatto');
-    const b = z.object({ rows: z.array(row).min(1).max(1000) }).parse(req.body);
+    const b = z.object({ rows: z.array(row).min(1).max(1000), bothChannels: z.boolean().optional().default(false) }).parse(req.body);
     const t = tenantOf(req), actor = `${actorOf(req)} (Excel)`;
     const refs = await existingRefs(t), people = await openPeople(t);
     const noSend = (await getArea(pool, t)).noSend;
@@ -350,7 +351,7 @@ export async function panelRoutes(app: FastifyInstance) {
           customer: { name: r.name, phone_e164: r.phone || null, email: r.email || null, consent_whatsapp: Boolean(r.phone) },
           address: r.address, cap: r.cap || null, product: r.product || null,
           city: r.city || null, province: r.province || null, cod_amount: r.cod_amount, pickup: r.pickup, source: r.source,
-          slot_id: await slotIdFor(t, plan.slot.date, plan.slot.bandId),
+          slot_id: await slotIdFor(t, plan.slot.date, plan.slot.bandId), both_channels: b.bothChannels,
         }, actor, { notSent: excluded ?? undefined });
         refs.add(ref.toLowerCase()); people.add(personKey(r.name, r.address));
         if (!excluded) await enqueue.proposal(id);

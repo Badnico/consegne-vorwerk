@@ -334,6 +334,7 @@ a.btn{text-decoration:none;color:inherit;display:inline-flex;align-items:center}
       </div>
 
       <div class="pane" id="p-new" hidden>
+        <div class="days" style="margin-bottom:12px"><label title="Vale per le consegne caricate da Excel e per quelle inserite a mano"><input type="checkbox" id="nBoth"> Invia sia su WhatsApp sia per email <small>(ai clienti che hanno entrambi i contatti)</small></label></div>
         <fieldset id="imp">
           <legend>Carica le consegne da Excel</legend>
           <p class="note">Una riga per consegna; se il file ha più fogli (es. uno per zona) li leggo tutti. Colonne necessarie: <b>Cliente</b>, <b>Indirizzo</b> e almeno uno tra <b>Telefono</b> ed <b>Email</b>. Facoltative: CAP, Località, Provincia, Ordine, Prodotto (o Brand), Importo Contrassegno, Priorita Evasione, Data e Fascia. Prima dell'invio puoi scegliere data e fascia per ogni cliente o compilarle in automatico.</p>
@@ -361,7 +362,7 @@ a.btn{text-decoration:none;color:inherit;display:inline-flex;align-items:center}
             <div class="btngroup"><button class="btn primary" type="submit">Invia messaggio al cliente</button></div>
           </fieldset>
         </form>
-        <p class="note">Il messaggio parte su WhatsApp e/o email in base ai contatti inseriti. Dopo l'invio trovi a destra i dati del cliente e il messaggio che riceve.</p>
+        <p class="note">Senza spunta il messaggio parte su WhatsApp se c'è il numero, altrimenti per email. Con la spunta parte su entrambi (se il cliente ha numero ed email). Dopo l'invio trovi a destra i dati del cliente e il messaggio che riceve.</p>
       </div>
 
       <div class="pane" id="p-rep" hidden>
@@ -1288,7 +1289,7 @@ $('impPrev').addEventListener('click', async e => {
   const rows = imp.rows.filter(x => impSendable(x) && !x.issue).map(({errors, slot, slotIssue, auto, sel, issue, noSend, ...r}) => noSend ? {...r, date: null, band: null} : ({...r, date: sel.date, band: sel.bandId.split('-')[0]}));
   imp.busy = true; renderImport();
   try {
-    imp.result = await api('/import/commit', {body:{rows}}); imp.rows = null;
+    imp.result = await api('/import/commit', {body:{rows, bothChannels: $('nBoth').checked}}); imp.rows = null;
     await load();
     toast(`${imp.result.sent} ${imp.result.sent===1?'messaggio inviato':'messaggi inviati'}`);
   } catch (ex){ $('impErr').textContent = ex.message; $('impErr').hidden = false; }
@@ -1363,7 +1364,7 @@ $('fNew').addEventListener('submit', async e => {
   if (!f.bandId) return fail('Tutte le fasce di quel giorno sono piene. Scegli un altro giorno.');
   if (!cfg.days.includes(parse(f.date).getDay())) return fail('Quel giorno non è attivo per le consegne.');
   try {
-    const n = await api('/deliveries', {body:{name:f.name, address:f.address, cap:f.cap, phone:f.phone, email:f.email, product:f.product, date:f.date, bandId:f.bandId}});
+    const n = await api('/deliveries', {body:{name:f.name, address:f.address, cap:f.cap, phone:f.phone, email:f.email, product:f.product, date:f.date, bandId:f.bandId, bothChannels: $('nBoth').checked}});
     e.target.reset(); $('nCapOut').textContent=''; setDefaultDate();
     ui.ch = f.phone ? 'wa' : 'mail'; document.querySelectorAll('.seg button').forEach(x => x.setAttribute('aria-pressed', x.dataset.ch===ui.ch));
     ui.simId = n.id; ui.view='msg';

@@ -57,6 +57,14 @@ test('dieci proposte in parallelo su 3 posti: ne passano esattamente 3', async (
   assert.equal(await booked(s), 3);
 });
 
+test('sia WhatsApp sia email: la scelta resta sulla consegna (di base no)', async () => {
+  const s = await slot('01:00', 5);
+  const a = await createDelivery(T, { order_ref: order(), customer: { ...customer, phone_e164: '+393330000001', consent_whatsapp: true }, address: 'Via Padova 1, Milano', slot_id: s, both_channels: true }, 'test');
+  const b = await createDelivery(T, { order_ref: order(), customer, address: 'Via Padova 1, Milano', slot_id: s }, 'test');
+  assert.equal((await getDelivery(pool, a)).both_channels, true);
+  assert.equal((await getDelivery(pool, b)).both_channels, false);
+});
+
 test('il No libera il posto, la nuova scelta lo occupa altrove', async () => {
   const a = await slot('11:00', 1), b = await slot('14:00', 2);
   const id = await createDelivery(T, { order_ref: order(), customer, address: 'Via Padova 1, Milano', slot_id: a }, 'test');
