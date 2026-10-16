@@ -432,6 +432,16 @@ a.btn{text-decoration:none;color:inherit;display:inline-flex;align-items:center}
       <div class="pane" id="p-msg" hidden>
         <p class="note">Modifica i testi che riceve il cliente. Mentre scrivi, il telefono a destra mostra l'anteprima con i dati di una consegna reale. I campi tra parentesi graffe vengono sostituiti con i dati di ogni cliente.</p>
         <div class="days"><label><input type="checkbox" id="flowPin"> Dopo il Sì chiedi "Hai ricevuto il PIN?"</label></div>
+        <fieldset>
+          <legend>Sollecito a chi non risponde</legend>
+          <div class="fields">
+            <label class="f">Manda il sollecito dopo (ore)<input id="tmRem" type="number" min="0" max="168" step="1" inputmode="numeric"><small>0 = nessun sollecito. Es. 24 = il giorno dopo</small></label>
+            <label class="f">Segna "Senza risposta" dopo (ore dalla proposta)<input id="tmNo" type="number" min="1" max="336" step="1" inputmode="numeric"><small>Poi la consegna va richiamata. Vale anche per chi ha detto No e non sceglie la data</small></label>
+          </div>
+          <p class="note" id="tmNote"></p>
+          <p class="err" id="tmErr" hidden></p>
+          <div class="btngroup"><button class="btn" id="saveTiming" type="button">Salva tempi</button></div>
+        </fieldset>
         <div class="vars" id="vars"></div>
         <div id="msgFields" class="msgfields"></div>
         <p class="err" id="mErr" hidden></p>
@@ -519,7 +529,7 @@ async function load(){
   try {
     const st = await api('/state');
     const cfgChanged = !same(cfg, st.schedule), areaChanged = !same(area, st.area), msgChanged = !same(msgs, st.messages);
-    cfg = st.schedule; area = st.area; msgs = {...MSG_DEFAULT, ...st.messages}; deliveries = st.deliveries; flow = st.flow || {askPin:true}; $('flowPin').checked = !!flow.askPin;
+    cfg = st.schedule; area = st.area; msgs = {...MSG_DEFAULT, ...st.messages}; deliveries = st.deliveries; flow = st.flow || {askPin:true}; $('flowPin').checked = !!flow.askPin; if (st.timing && !ui.tmDirty) renderTiming(st.timing);
     if (cfgChanged && !ui.slotDirty) renderSlotEditor();
     if (areaChanged && !areaDirty) renderAreaEditor();
     if (msgChanged && !msgDraft) renderMsgEditor();
@@ -694,6 +704,18 @@ const MSG_FIELDS = [
   ]},
 ];
 let msgs = {...MSG_DEFAULT}, msgDraft = null, msgFocus = null, flow = {askPin:true};
+function timingNote(r, n){ return r > 0 ? `Il cliente che non risponde riceve il sollecito dopo ${r} ${r===1?'ora':'ore'}; dopo ${n} ore dalla proposta la consegna diventa "Senza risposta". Il sollecito su WhatsApp costa come la proposta.` : `Nessun sollecito: dopo ${n} ore dalla proposta la consegna diventa "Senza risposta".`; }
+function renderTiming(t){ $('tmRem').value = t.reminderHours; $('tmNo').value = t.noResponseHours; $('tmNote').textContent = timingNote(t.reminderHours, t.noResponseHours); }
+['tmRem','tmNo'].forEach(id => $(id).addEventListener('input', () => { ui.tmDirty = true; const r = +$('tmRem').value || 0, n = +$('tmNo').value || 0; $('tmNote').textContent = timingNote(r, n) + ' (non ancora salvato)'; }));
+$('saveTiming').addEventListener('click', async () => {
+  const err = $('tmErr'); err.hidden = true;
+  const r = Number($('tmRem').value), n = Number($('tmNo').value);
+  if (!Number.isInteger(r) || r < 0 || r > 168) { err.textContent = 'Sollecito: un numero intero di ore da 0 a 168.'; err.hidden = false; return; }
+  if (!Number.isInteger(n) || n < 1 || n > 336) { err.textContent = '"Senza risposta": un numero intero di ore da 1 a 336.'; err.hidden = false; return; }
+  if (r > 0 && n <= r) { err.textContent = '"Senza risposta" deve venire dopo il sollecito: metti più ore del sollecito.'; err.hidden = false; return; }
+  try { const t = await api('/timing', {method:'PUT', body:{reminderHours:r, noResponseHours:n}}); ui.tmDirty = false; renderTiming(t); toast('Tempi salvati: valgono per le nuove proposte'); }
+  catch (ex) { err.textContent = ex.message; err.hidden = false; }
+});
 $('flowPin').addEventListener('change', async e => {
   try { flow = await api('/flow', {method:'PUT', body:{askPin: e.target.checked}}); toast(flow.askPin ? 'Dopo il Sì verrà chiesto se ha ricevuto il PIN' : 'Domanda sul PIN spenta: il Sì conferma subito'); renderPhone(); }
   catch (err){ e.target.checked = !e.target.checked; toast(err.message); }

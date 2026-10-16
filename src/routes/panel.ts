@@ -11,8 +11,7 @@ import {
 } from '../domain/deliveries.js';
 import { generateSlots, replaceTemplates } from '../domain/slots.js';
 import {
-  getArea, getBooking, getMessages, parseArea, saveArea, saveBooking, saveMessages, validateMessages, MESSAGE_DEFAULTS, type Messages,
-} from '../domain/settings.js';
+  getArea, getBooking, getMessages, parseArea, saveArea, saveBooking, saveMessages, validateMessages, MESSAGE_DEFAULTS, type Messages, getTiming, saveTiming } from '../domain/settings.js';
 import { createToken, customerUrl } from '../domain/tokens.js';
 import { getFeatures, getFlow, getReportSetting, noSendMatch, saveFlow, saveReportSetting } from '../domain/settings.js';
 import { openSlots, parseWorkbook, personKey, planSlots, templateWorkbook, type ImportRow, type PlannedRow } from '../domain/importer.js';
@@ -122,6 +121,7 @@ export async function panelRoutes(app: FastifyInstance) {
       area: await getArea(pool, t),
       messages: await getMessages(pool, t),
       flow: await getFlow(pool, t),
+      timing: await getTiming(pool, t),
       deliveries: list.map((d) => ({ ...toPanel(d, logs.get(d.id)), unread: inbox.get(d.id)?.unread ?? 0, lastIn: inbox.get(d.id)?.lastIn ?? null })),
     };
   });
@@ -403,6 +403,17 @@ export async function panelRoutes(app: FastifyInstance) {
   app.put('/flow', async (req) => {
     const b = z.object({ askPin: z.boolean() }).parse(req.body);
     await saveFlow(pool, tenantOf(req), b);
+    return b;
+  });
+
+  app.put('/timing', async (req) => {
+    const b = z.object({
+      reminderHours: z.number().int().min(0, 'Minimo 0 (nessun sollecito)').max(168, 'Massimo 168 ore (7 giorni)'),
+      noResponseHours: z.number().int().min(1, 'Minimo 1 ora').max(336, 'Massimo 336 ore (14 giorni)'),
+    }).parse(req.body);
+    if (b.reminderHours > 0 && b.noResponseHours <= b.reminderHours)
+      throw new DomainError('invalid_timing', '"Senza risposta" deve venire dopo il sollecito: metti più ore del sollecito.', 422);
+    await saveTiming(pool, tenantOf(req), b);
     return b;
   });
 

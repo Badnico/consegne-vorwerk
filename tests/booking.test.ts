@@ -504,3 +504,12 @@ test('messaggi dei clienti: collegati alla consegna dal numero, separati per num
   await markRead(pool, id1);
   assert.equal((await inboxSummary(pool, [id1])).get(id1)!.unread, 0);
 });
+
+test('tempi del sollecito: ogni azienda ha i suoi, gli altri restano sui valori di base', async () => {
+  const { getTiming, saveTiming } = await import('../src/domain/settings.js');
+  const { config } = await import('../src/config.js');
+  assert.deepEqual(await getTiming(pool, T), { reminderHours: config.REMINDER_AFTER_HOURS, noResponseHours: config.NO_RESPONSE_AFTER_HOURS });
+  await saveTiming(pool, T, { reminderHours: 0, noResponseHours: 12 });
+  assert.deepEqual(await getTiming(pool, T), { reminderHours: 0, noResponseHours: 12 });
+  assert.equal((await getTiming(pool, T2)).reminderHours, config.REMINDER_AFTER_HOURS);
+});

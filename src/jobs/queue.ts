@@ -5,6 +5,7 @@ import { pool } from '../lib/db.js';
 import { getDelivery, incrementReminders, markNoResponse, type Status } from '../domain/deliveries.js';
 import { activeTenantIds, generateSlots } from '../domain/slots.js';
 import { purgeExpiredReports, runDueReports } from '../domain/report.js';
+import { getTiming } from '../domain/settings.js';
 import { sendPinQuestion, sendConfirmation, sendOutOfArea, sendProposal, sendRescheduleLink } from '../notify/notifier.js';
 
 /**
@@ -71,7 +72,10 @@ async function registerWorkers(b: PgBoss) {
   await b.work<IdJob>(Q.proposal, safe(async ([job]) => {
     const id = job!.data.deliveryId;
     await sendProposal(id, 'proposal');
-    await b.send(Q.reminder, { deliveryId: id }, { ...retry, startAfter: hours(config.REMINDER_AFTER_HOURS) });
+    // tempi scelti dall'azienda (scheda Messaggi): sollecito, oppure nessun sollecito e solo la scadenza
+    const tm = await getTiming(pool, (await getDelivery(pool, id)).tenant_id);
+    if (tm.reminderHours > 0) await b.send(Q.reminder, { deliveryId: id }, { ...retry, startAfter: hours(tm.reminderHours) });
+    else await b.send(Q.expire, { deliveryId: id, ifStatus: 'proposed' } satisfies ExpireJob, { startAfter: hours(tm.noResponseHours) });
   }));
 
   await b.work<IdJob>(Q.reminder, safe(async ([job]) => {
@@ -80,7 +84,8 @@ async function registerWorkers(b: PgBoss) {
     if (d.status !== 'proposed') return;
     await sendProposal(id, 'reminder');
     await incrementReminders(id);
-    const wait = Math.max(config.NO_RESPONSE_AFTER_HOURS - config.REMINDER_AFTER_HOURS, 1);
+    const tm = await getTiming(pool, d.tenant_id);
+    const wait = Math.max(tm.noResponseHours - tm.reminderHours, 1);
     await b.send(Q.expire, { deliveryId: id, ifStatus: 'proposed' } satisfies ExpireJob, { startAfter: hours(wait) });
   }));
 
@@ -90,7 +95,8 @@ async function registerWorkers(b: PgBoss) {
     if (d.status === 'out_of_area') { await sendOutOfArea(id); return; } // ci pensa l'operatore
     if (d.status !== 'to_reschedule') return;
     await sendRescheduleLink(id);
-    await b.send(Q.expire, { deliveryId: id, ifStatus: 'to_reschedule' } satisfies ExpireJob, { startAfter: hours(config.NO_RESPONSE_AFTER_HOURS) });
+    const tm = await getTiming(pool, d.tenant_id);
+    await b.send(Q.expire, { deliveryId: id, ifStatus: 'to_reschedule' } satisfies ExpireJob, { startAfter: hours(tm.noResponseHours) });
   }));
 
   await b.work<IdJob>(Q.afterConfirm, safe(async ([job]) => {

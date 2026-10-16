@@ -177,6 +177,12 @@ export const saveReportState = async (db: Db, t: string, patch: ReportState) => 
 /** Percorso dei messaggi. askPin: dopo il Sì chiede "Hai ricevuto il PIN?" prima di confermare. */
 export interface FlowSetting { askPin: boolean }
 export const getFlow = (db: Db, t: string) => get<FlowSetting>(db, t, 'flow', { askPin: true });
+
+/* ---------- tempi di sollecito e "senza risposta" (per azienda) ---------- */
+export interface TimingSetting { reminderHours: number; noResponseHours: number } // reminderHours 0 = nessun sollecito
+export const timingDefault = (): TimingSetting => ({ reminderHours: config.REMINDER_AFTER_HOURS, noResponseHours: config.NO_RESPONSE_AFTER_HOURS });
+export const getTiming = async (db: Db, t: string) => ({ ...timingDefault(), ...(await get<Partial<TimingSetting>>(db, t, 'timing', {})) });
+export const saveTiming = (db: Db, t: string, v: TimingSetting) => put(db, t, 'timing', v);
 export const saveFlow = (db: Db, t: string, f: FlowSetting) => put(db, t, 'flow', f);
 
 /**
