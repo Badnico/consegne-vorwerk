@@ -240,6 +240,16 @@ a.btn{text-decoration:none;color:inherit;display:inline-flex;align-items:center}
 .filebtn input{position:absolute;inset:0;opacity:0;cursor:pointer}
 .imphead{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;margin:14px 0 8px;font-size:14px}
 .imptab{width:100%;border-collapse:collapse;font-size:13px;min-width:760px}
+.tmr{margin-top:16px;border-top:1px solid var(--line);padding-top:12px}
+.tmr h4{margin:0 0 4px;font-size:14px}
+.tmr .scroll{max-height:320px;overflow:auto}
+.tmr table{width:100%;border-collapse:collapse;font-size:13px}
+.tmr th{text-align:left;font-weight:600;color:var(--muted);font-size:12px;padding:6px 8px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--surface)}
+.tmr td{padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+.tmr .cd{font-family:var(--f-mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+.tmr .cd small{display:block;font-family:inherit;color:var(--muted);font-size:11px}
+.tmr .done{color:var(--muted)}
+.tmr .soon{color:var(--accent);font-weight:600}
 .imptab th{text-align:left;font-weight:600;color:var(--muted);font-size:12px;padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
 .imptab td{padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}
 .imptab td small{display:block;color:var(--muted)}
@@ -441,6 +451,11 @@ a.btn{text-decoration:none;color:inherit;display:inline-flex;align-items:center}
           <p class="note" id="tmNote"></p>
           <p class="err" id="tmErr" hidden></p>
           <div class="btngroup"><button class="btn primary" id="saveTiming" type="button">Salva tempi</button></div>
+          <div class="tmr" aria-live="off">
+            <h4>Conto alla rovescia</h4>
+            <p class="note" style="margin:0 0 8px">Consegne che aspettano una risposta, con i tempi salvati qui sopra. Il portale controlla ogni minuto, quindi l'invio può arrivare fino a un minuto dopo lo zero.</p>
+            <div id="tmList"></div>
+          </div>
         </fieldset>
         <div class="vars" id="vars"></div>
         <div id="msgFields" class="msgfields"></div>
@@ -713,10 +728,53 @@ async function saveTiming(){
   if (!Number.isInteger(r) || r < 0 || r > 168) { err.textContent = 'Sollecito: un numero intero di ore da 0 a 168.'; err.hidden = false; return; }
   if (!Number.isInteger(n) || n < 1 || n > 336) { err.textContent = '"Senza risposta": un numero intero di ore da 1 a 336.'; err.hidden = false; return; }
   if (r > 0 && n <= r) { err.textContent = '"Senza risposta" deve venire dopo il sollecito: metti più ore del sollecito.'; err.hidden = false; return; }
-  try { const t = await api('/timing', {method:'PUT', body:{reminderHours:r, noResponseHours:n}}); ui.tmDirty = false; renderTiming(t); toast('Tempi salvati: valgono subito, anche per le consegne già proposte'); }
+  try { const t = await api('/timing', {method:'PUT', body:{reminderHours:r, noResponseHours:n}}); ui.tmDirty = false; renderTiming(t); loadTimers(); toast('Tempi salvati: valgono subito, anche per le consegne già proposte'); }
   catch (ex) { err.textContent = ex.message; err.hidden = false; }
 }
 $('saveTiming').addEventListener('click', saveTiming);
+
+/* conto alla rovescia: dati dal server ogni 30 secondi, il timer scorre ogni secondo */
+const tmr = { items: [], skew: 0, at: 0 };
+async function loadTimers(){
+  try {
+    const r = await api('/timers');
+    tmr.items = r.items; tmr.skew = Date.parse(r.now) - Date.now(); tmr.at = Date.now();
+    renderTimers();
+  } catch { /* riprova al prossimo giro */ }
+}
+function countdown(iso){
+  const ms = Date.parse(iso) - (Date.now() + tmr.skew);
+  if (ms <= 0) return null;
+  const s = Math.floor(ms/1000), d = Math.floor(s/86400), h = Math.floor(s%86400/3600), m = Math.floor(s%3600/60), x = s%60;
+  const p = n => String(n).padStart(2,'0');
+  return (d ? d + 'g ' : '') + p(h) + ':' + p(m) + ':' + p(x);
+}
+const whenTxt = iso => new Date(iso).toLocaleString('it-IT', {weekday:'short', day:'numeric', month:'short', hour:'2-digit', minute:'2-digit'});
+function renderTimers(){
+  const box = $('tmList'); if (!box) return;
+  if (!tmr.items.length) { box.innerHTML = '<p class="note" style="margin:0">Nessuna consegna in attesa di risposta in questo momento.</p>'; return; }
+  const cell = (iso, doneTxt, offTxt) => {
+    if (!iso) return `<span class="done">${offTxt}</span>`;
+    const c = countdown(iso);
+    if (c === null) return `<span class="soon">${doneTxt}</span>`;
+    return `<span class="cd">${c}<small>${esc(whenTxt(iso))}</small></span>`;
+  };
+  const top = box.querySelector('.scroll')?.scrollTop || 0;
+  box.innerHTML = `<div class="scroll"><table><thead><tr><th>Cliente</th><th>Stato</th><th>Sollecito tra</th><th>"Senza risposta" tra</th></tr></thead><tbody>` +
+    tmr.items.map(t => {
+      const rem = t.status !== 'proposed' ? '<span class="done">non previsto</span>'
+        : t.reminder_sent ? '<span class="done">già inviato</span>'
+        : cell(t.reminder_at, 'in invio…', 'spento (0 ore)');
+      return `<tr><td>${esc(t.customer_name)}${t.order_ref ? `<small style="display:block;color:var(--muted)">${esc(t.order_ref)}</small>` : ''}</td>` +
+        `<td>${t.status === 'proposed' ? 'In attesa' : 'Ha detto No, deve scegliere la data'}</td>` +
+        `<td>${rem}</td><td>${cell(t.expire_at, 'in aggiornamento…', '')}</td></tr>`;
+    }).join('') + '</tbody></table></div>';
+  box.querySelector('.scroll').scrollTop = top;
+}
+setInterval(() => {
+  if (ui.tab !== 'msg' || document.visibilityState !== 'visible') return;
+  if (Date.now() - tmr.at > 30000) loadTimers(); else renderTimers();
+}, 1000);
 // si salva da solo appena esci dal campo (o premi Invio), senza dover cercare il pulsante
 ['tmRem','tmNo'].forEach(id => $(id).addEventListener('change', () => { if (ui.tmDirty) saveTiming(); }));
 $('flowPin').addEventListener('change', async e => {
@@ -1146,6 +1204,7 @@ document.querySelector('.tabs').addEventListener('click', e => {
   if (ui.tab==='area' && !areaDirty) renderAreaEditor();
   if (ui.tab==='slot' && !ui.slotDirty) renderSlotEditor();
   if (ui.tab==='msg' && !msgDraft) renderMsgEditor();
+  if (ui.tab==='msg') loadTimers();
   renderPhone();
 });
 $('wPrev').onclick = () => { ui.week = addDays(ui.week,-7); renderCal(); };

@@ -56,3 +56,26 @@ export async function claimReminder(db: Db, id: string) {
 export async function releaseReminder(db: Db, id: string) {
   await db.query('UPDATE deliveries SET reminders_sent = 0 WHERE id = $1 AND reminders_sent = 1', [id]);
 }
+
+/** Conto alla rovescia per la scheda Messaggi: quando partirà il sollecito e quando la consegna diventerà "Senza risposta". */
+export async function listTimers(db: Db, tenantId: string, tm: TimingSetting) {
+  const r = await db.query<{
+    id: string; order_ref: string | null; customer_name: string; status: string;
+    reminder_at: string | null; reminder_sent: boolean; expire_at: string;
+  }>(
+    `WITH base AS (
+       SELECT d.id, d.order_ref, c.name AS customer_name, d.status::text AS status, d.reminders_sent, d.created_at,
+              CASE WHEN d.status = 'to_reschedule' THEN COALESCE(
+                (SELECT max(e.created_at) FROM delivery_events e WHERE e.delivery_id = d.id AND e.to_status = 'to_reschedule'),
+                d.updated_at) ELSE d.created_at END AS since
+         FROM deliveries d JOIN customers c ON c.id = d.customer_id
+        WHERE d.tenant_id = $1 AND d.status IN ('proposed', 'to_reschedule'))
+     SELECT id, order_ref, customer_name, status,
+            CASE WHEN status = 'proposed' AND $2 > 0 THEN created_at + make_interval(hours => $2) END AS reminder_at,
+            reminders_sent > 0 AS reminder_sent,
+            since + make_interval(hours => $3) AS expire_at
+       FROM base ORDER BY expire_at LIMIT 200`,
+    [tenantId, tm.reminderHours, tm.noResponseHours],
+  );
+  return r.rows;
+}

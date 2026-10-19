@@ -538,3 +538,15 @@ test('sollecito e "Senza risposta" seguono i tempi attuali, anche per consegne g
   r = await dueTimers(pool, T, { reminderHours: 1, noResponseHours: 2 });
   assert.ok(r.expire.includes(b) && !r.remind.includes(b));
 });
+
+test('conto alla rovescia: orari di sollecito e "Senza risposta" con i tempi attuali', async () => {
+  const { listTimers } = await import('../src/domain/timing.js');
+  const s = await slot('00:15', 5);
+  const a = await createDelivery(T, { order_ref: order(), customer, address: 'Via Padova 4, Milano', slot_id: s }, 'test');
+  const row = (await listTimers(pool, T, { reminderHours: 3, noResponseHours: 5 })).find((x) => x.id === a)!;
+  const created = (await pool.query<{ c: Date }>('SELECT created_at AS c FROM deliveries WHERE id = $1', [a])).rows[0]!.c.getTime();
+  assert.equal(new Date(row.reminder_at!).getTime() - created, 3 * 3600_000);
+  assert.equal(new Date(row.expire_at).getTime() - created, 5 * 3600_000);
+  const off = (await listTimers(pool, T, { reminderHours: 0, noResponseHours: 5 })).find((x) => x.id === a)!;
+  assert.equal(off.reminder_at, null);
+});

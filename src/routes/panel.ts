@@ -4,6 +4,7 @@ import { pool, tx } from '../lib/db.js';
 import { emailEnabled } from '../config.js';
 import { addDays, hhmm, todayLocal } from '../lib/dates.js';
 import { DomainError } from '../lib/errors.js';
+import { listTimers } from '../domain/timing.js';
 import { actorOf, requireOperator, tenantOf } from '../lib/auth.js';
 import {
   answerPin, markNotSent, bookSlot, confirmDelivery, declineDelivery, createDelivery, deleteDelivery, deliveryEvents, getDelivery, listDeliveries,
@@ -404,6 +405,12 @@ export async function panelRoutes(app: FastifyInstance) {
     const b = z.object({ askPin: z.boolean() }).parse(req.body);
     await saveFlow(pool, tenantOf(req), b);
     return b;
+  });
+
+  app.get('/timers', async (req) => {
+    const t = tenantOf(req);
+    const tm = await getTiming(pool, t);
+    return { now: new Date().toISOString(), timing: tm, items: await listTimers(pool, t, tm) };
   });
 
   app.put('/timing', async (req) => {
