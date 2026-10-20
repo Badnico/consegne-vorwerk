@@ -17,6 +17,10 @@ const params = z.object({ token: z.string() });
 async function publicView(d: DeliveryView) {
   const m = await getMessages(pool, d.tenant_id);
   const cur = messageVars(d, 'current'), prop = messageVars(d, 'proposed');
+  // "fuori area" perché ha risposto No alla domanda sul PIN: mostra il testo dedicato
+  const pinMissing = d.status === 'out_of_area' && ((await pool.query<{ note: string | null }>(
+    "SELECT note FROM delivery_events WHERE delivery_id = $1 AND to_status = 'out_of_area' ORDER BY id DESC LIMIT 1", [d.id],
+  )).rows[0]?.note?.startsWith('PIN non ricevuto') ?? false);
   const f = (k: keyof typeof m, v = cur) => fillText(m[k], v);
   return {
     order_ref: d.order_ref,
@@ -34,7 +38,7 @@ async function publicView(d: DeliveryView) {
       no: f('mail_no', prop),
       confirmed: confirmationText(m, d, 'mail_confirmed', cur),
       rescheduled: confirmationText(m, d, 'mail_rescheduled', cur),
-      out_of_area: f('mail_out_area'),
+      out_of_area: f(pinMissing ? 'mail_pin_missing' : 'mail_out_area'),
       pin_question: f('wa_pin_question'),
       pin_yes: f('wa_pin_yes'),
       pin_no: f('wa_pin_no'),
@@ -86,7 +90,7 @@ export async function customerRoutes(app: FastifyInstance) {
     const id = await resolveToken(pool, token);
     const st = await answerPin(id, received, 'customer:web');
     if (st === 'confirmed') await enqueue.afterConfirm(id);
-    else await enqueue.afterDecline(id);
+    else await enqueue.afterPinNo(id);
     noStore(reply);
     return publicView(await getDelivery(pool, id));
   });

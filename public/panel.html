@@ -682,6 +682,8 @@ const MSG_DEFAULT = {
   wa_pin_question: 'Hai ricevuto il PIN?',
   wa_pin_yes: 'Sì',
   wa_pin_no: 'No',
+  wa_pin_missing: 'Grazie per averci avvisato. Senza il PIN non possiamo completare la consegna: un nostro operatore ti contatterà a breve.',
+  mail_pin_missing: "Grazie per averci avvisato.\nSenza il PIN non possiamo completare la consegna dell'ordine {ordine}: un nostro operatore ti contatterà a breve.",
   extra_address: 'Indirizzo di consegna: {indirizzo}',
   extra_cod: "Ricorda che c'è il contrassegno da pagare di {contrassegno}.",
   extra_pickup: 'Ricorda di preparare al corriere il prodotto da ritirare.',
@@ -699,9 +701,10 @@ const MSG_FIELDS = [
     {k:'wa_out_area', label:'Risposta dopo il rifiuto, fuori area', st:'fuori_area', rows:3, hint:'Lo riceve chi risponde No ma ha un CAP fuori dall\'area servita, oppure tutti quelli che rispondono No se in "Area servita" è spuntato "Se clicca NO va richiamato".'},
   ]},
   {g:'Domanda sul PIN (dopo il Sì)', ch:'wa', items:[
-    {k:'wa_pin_question', label:'Domanda', st:'attesa_pin', rows:2, hint:'Arriva subito dopo il Sì, con i due pulsanti qui sotto. Se risponde No riceve la "Risposta dopo il rifiuto, fuori area" e va richiamato. Si attiva o spegne con la casella in alto.'},
+    {k:'wa_pin_question', label:'Domanda', st:'attesa_pin', rows:2, hint:'Arriva subito dopo il Sì, con i due pulsanti qui sotto. Se risponde No riceve la "Risposta se non ha il PIN" e va richiamato. Si attiva o spegne con la casella in alto.'},
     {k:'wa_pin_yes', label:'Pulsante Sì', st:'attesa_pin', max:20, novars:true},
     {k:'wa_pin_no', label:'Pulsante No', st:'attesa_pin', max:20, novars:true},
+    {k:'wa_pin_missing', label:'Risposta se non ha il PIN', st:'attesa_pin', rows:3, hint:'La riceve su WhatsApp chi risponde No alla domanda sul PIN. La consegna passa a "Fuori area, da contattare" e va richiamato.'},
   ]},
   {g:'Aggiunte al messaggio di conferma', ch:'wa', items:[
     {k:'extra_address', label:'Indirizzo di consegna', st:'confermato', rows:2, hint:'Si aggiunge sotto la conferma (se il testo della conferma non contiene già {indirizzo}).'},
@@ -718,6 +721,7 @@ const MSG_FIELDS = [
     {k:'mail_reschedule', label:'Invito a scegliere la data', st:'da_riprogrammare'},
     {k:'mail_rescheduled', label:'Dopo la nuova scelta', st:'riprogrammato', rows:2},
     {k:'mail_out_area', label:'Dopo il rifiuto, fuori area', st:'fuori_area', rows:3},
+    {k:'mail_pin_missing', label:'Se non ha il PIN', st:'fuori_area', rows:3, hint:'La riceve per email chi risponde No alla domanda sul PIN dalla sua pagina.'},
   ]},
   {g:'Pagina di scelta della data', ch:'wa', items:[
     {k:'page_title', label:'Titolo', st:'pick', max:80},

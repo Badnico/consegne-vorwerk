@@ -561,3 +561,19 @@ test('modello WhatsApp personalizzato: testo trasformato per Meta e controlli pr
   assert.match(checkForMeta('Ciao, arriva {data}')!, /finisce/);
   assert.match(checkForMeta('Ciao {nome}{data} ok?')!, /attaccati/);
 });
+
+test('PIN: chi risponde No riceve il testo dedicato "senza PIN", non quello fuori area', async () => {
+  const { MESSAGE_DEFAULTS, validateMessages } = await import('../src/domain/settings.js');
+  assert.ok(MESSAGE_DEFAULTS.wa_pin_missing && MESSAGE_DEFAULTS.mail_pin_missing);
+  assert.notEqual(MESSAGE_DEFAULTS.wa_pin_missing, MESSAGE_DEFAULTS.wa_out_area);
+  assert.equal(validateMessages({ ...MESSAGE_DEFAULTS }), null);
+});
+
+test('modello WhatsApp: "torna allo standard" cancella davvero il modello', async () => {
+  const { getWaTemplate, saveWaTemplate } = await import('../src/domain/settings.js');
+  assert.equal(await getWaTemplate(pool, T), null);
+  await saveWaTemplate(pool, T, { name: 'x', id: '1', text: 't', vars: [], waba: '1', status: 'APPROVED', reason: '', category: 'UTILITY', submittedAt: '', checkedAt: '' });
+  assert.equal((await getWaTemplate(pool, T))?.name, 'x');
+  await saveWaTemplate(pool, T, null);
+  assert.equal(await getWaTemplate(pool, T), null);
+});

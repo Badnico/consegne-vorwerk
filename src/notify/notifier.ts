@@ -155,15 +155,18 @@ export async function sendRescheduleLink(deliveryId: string) {
 }
 
 /** Dopo un "No" fuori dall'area servita: niente link, lo contatterà un operatore. */
-export async function sendOutOfArea(deliveryId: string) {
+/** "Fuori area": lo richiama un operatore. Con reason 'pin' è la risposta a chi non ha ricevuto il PIN. */
+export async function sendOutOfArea(deliveryId: string, reason: 'area' | 'pin' = 'area') {
   const d = await getDelivery(pool, deliveryId);
   const m = await getMessages(pool, d.tenant_id);
   const v = messageVars(d, 'current');
+  const waKey = reason === 'pin' ? 'wa_pin_missing' : 'wa_out_area';
+  const mailKey = reason === 'pin' ? 'mail_pin_missing' : 'mail_out_area';
   return deliver(
     d,
     'out_of_area',
-    (c) => wa.sendText(c, d.phone_e164!, t(m, 'wa_out_area', v)),
-    () => sendEmail(sender(d), d.email!, t(m, 'mail_subject', v), t(m, 'mail_out_area', v), layout(para(t(m, 'mail_out_area', v)))),
+    (c) => wa.sendText(c, d.phone_e164!, t(m, waKey, v)),
+    () => sendEmail(sender(d), d.email!, t(m, 'mail_subject', v), t(m, mailKey, v), layout(para(t(m, mailKey, v)))),
   );
 }
 

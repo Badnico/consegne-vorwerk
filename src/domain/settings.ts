@@ -26,6 +26,8 @@ export const MESSAGE_DEFAULTS = {
   wa_pin_question: 'Hai ricevuto il PIN?',
   wa_pin_yes: 'Sì',
   wa_pin_no: 'No',
+  wa_pin_missing: 'Grazie per averci avvisato. Senza il PIN non possiamo completare la consegna: un nostro operatore ti contatterà a breve.',
+  mail_pin_missing: "Grazie per averci avvisato.\nSenza il PIN non possiamo completare la consegna dell'ordine {ordine}: un nostro operatore ti contatterà a breve.",
   extra_address: 'Indirizzo di consegna: {indirizzo}',
   extra_cod: "Ricorda che c'è il contrassegno da pagare di {contrassegno}.",
   extra_pickup: 'Ricorda di preparare al corriere il prodotto da ritirare.',
@@ -201,7 +203,10 @@ export interface WaTemplateSetting {
   name: string; id: string; text: string; vars: string[]; waba: string;
   status: string; reason: string; category: string; submittedAt: string; checkedAt: string;
 }
-export const getWaTemplate = (db: Db, t: string) => get<WaTemplateSetting | null>(db, t, 'wa_template', null);
+export async function getWaTemplate(db: Db, t: string): Promise<WaTemplateSetting | null> {
+  const v = await get<Partial<WaTemplateSetting>>(db, t, 'wa_template', {});
+  return v && v.name ? (v as WaTemplateSetting) : null; // null = nessun modello personalizzato
+}
 export const saveWaTemplate = (db: Db, t: string, v: WaTemplateSetting | null) => put(db, t, 'wa_template', v);
 export const saveWaSetting = (db: Db, t: string, w: WaSetting) => put(db, t, 'whatsapp', w);
 /** Ambienti che hanno impostato questo numero (per il webhook). */

@@ -188,7 +188,7 @@ export async function panelRoutes(app: FastifyInstance) {
     if (answer === 'yes') { if ((await confirmDelivery(id, actor, t)) === 'confirmed') await enqueue.afterConfirm(id); } // con il PIN: la domanda si risponde nell'anteprima
     else if (answer === 'no') { await declineDelivery(id, actor, t); await enqueue.afterDecline(id); }
     else if ((await answerPin(id, answer === 'pin_yes', actor, t)) === 'confirmed') await enqueue.afterConfirm(id);
-    else await enqueue.afterDecline(id);
+    else await enqueue.afterPinNo(id);
     return toPanel(await getDelivery(pool, id));
   });
 

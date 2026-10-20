@@ -35,7 +35,7 @@ async function handleReply(payload: string) {
     } else if (a === 'PINYES' || a === 'PINNO') {
       const st = await answerPin(deliveryId, a === 'PINYES', 'customer:whatsapp');
       if (st === 'confirmed') await enqueue.afterConfirm(deliveryId);
-      else await enqueue.afterDecline(deliveryId); // messaggio "fuori area": lo richiama un operatore
+      else await enqueue.afterPinNo(deliveryId); // messaggio "senza PIN": lo richiama un operatore
     } else {
       await declineDelivery(deliveryId, 'customer:whatsapp');
       await enqueue.afterDecline(deliveryId);

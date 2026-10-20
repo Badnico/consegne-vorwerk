@@ -54,6 +54,8 @@ function q() {
 export const enqueue = {
   proposal: (deliveryId: string) => q().send(Q.proposal, { deliveryId }, { ...retry, singletonKey: `proposal:${deliveryId}` }),
   afterDecline: (deliveryId: string) => q().send(Q.afterDecline, { deliveryId }, retry),
+  /** No alla domanda sul PIN: messaggio dedicato, poi lo richiama un operatore. */
+  afterPinNo: (deliveryId: string) => q().send(Q.afterDecline, { deliveryId, pin: true }, retry),
   afterConfirm: (deliveryId: string) => q().send(Q.afterConfirm, { deliveryId }, retry),
   askPin: (deliveryId: string) => q().send(Q.askPin, { deliveryId }, retry),
 };
@@ -88,10 +90,10 @@ async function registerWorkers(b: PgBoss) {
     catch (err) { await releaseReminder(pool, id); throw err; } // invio fallito: si ritenta
   }));
 
-  await b.work<IdJob>(Q.afterDecline, safe(async ([job]) => {
+  await b.work<IdJob & { pin?: boolean }>(Q.afterDecline, safe(async ([job]) => {
     const id = job!.data.deliveryId;
     const d = await getDelivery(pool, id);
-    if (d.status === 'out_of_area') { await sendOutOfArea(id); return; } // ci pensa l'operatore
+    if (d.status === 'out_of_area') { await sendOutOfArea(id, job!.data.pin ? 'pin' : 'area'); return; } // ci pensa l'operatore
     if (d.status !== 'to_reschedule') return;
     await sendRescheduleLink(id);
   }));
