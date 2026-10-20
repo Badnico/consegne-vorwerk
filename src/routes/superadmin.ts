@@ -34,6 +34,7 @@ export async function superadminRoutes(app: FastifyInstance) {
     const tenants = await listTenants();
     return {
       base: config.PUBLIC_BASE_URL,
+      site: config.SITE_URL.replace(/\/+$/, ''),
       globalWhatsapp: Boolean(wa.globalWaConfig()),
       tenants: await Promise.all(tenants.map(async (t) => {
         const w = await getWaSetting(pool, t.id);

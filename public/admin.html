@@ -55,7 +55,7 @@ th,td{text-align:left;padding:12px 14px;border-bottom:1px solid var(--line);vert
 th{font-size:12px;color:var(--muted);font-weight:600;background:var(--sunk)}
 tr:last-child td{border-bottom:0}
 td small{display:block;color:var(--muted)}
-td a{color:var(--accent);font-family:var(--f-mono);font-size:12px;text-decoration:none}
+td a{display:block;color:var(--accent);font-family:var(--f-mono);font-size:12px;text-decoration:none}
 td a:hover{text-decoration:underline}
 .num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
 .empty{padding:40px 16px;text-align:center;color:var(--muted)}
@@ -211,7 +211,10 @@ const parse = (s) => { const [y,m,d] = s.split('-').map(Number); return new Date
 const fmt = (s) => parse(s).toLocaleDateString('it-IT', { day:'numeric', month:'short', year:'numeric' });
 const daysLeft = (s) => Math.round((parse(s) - parse(today())) / 864e5);
 const addMonths = (s, n) => { const d = parse(s); const day = d.getDate(); d.setMonth(d.getMonth() + n); if (d.getDate() < day) d.setDate(0); return iso(d); };
-let data = { base:'', tenants:[] }, editing = null, q = '';
+let data = { base:'', site:'', tenants:[] }, editing = null, q = '';
+// indirizzi dell'ambiente: prima quello di marca (www.smartconsegne.com), poi quello di Render
+const urlsOf = slug => [data.site, data.base].filter(Boolean).map(b => `${b}/${slug}/`);
+const bare = u => u.replace(/^https?:\/\//,'');
 
 function toast(m){ const t = $('toast'); t.textContent = m; t.hidden = false; clearTimeout(toast.h); toast.h = setTimeout(() => t.hidden = true, 2800); }
 async function api(path, opts = {}){
@@ -242,9 +245,9 @@ function render(){
   if (!T.length){ $('rows').innerHTML = `<tr><td colspan="7" class="empty"><b>Nessun ambiente</b>Crea il primo con "Nuovo ambiente": il cliente riceve indirizzo, utente e password.</td></tr>`; return; }
   if (!list.length){ $('rows').innerHTML = `<tr><td colspan="7" class="empty">Nessun ambiente corrisponde alla ricerca.</td></tr>`; return; }
   $('rows').innerHTML = list.map((t) => {
-    const st = state(t), url = `${data.base}/${t.slug}/`;
+    const st = state(t);
     return `<tr>
-      <td><b>${esc(t.name)}</b>${t.whatsapp && t.whatsapp.phoneNumberId ? '<span class="wachip">WhatsApp proprio</span>' : ''}<a href="${esc(url)}" target="_blank" rel="noopener">${esc(url.replace(/^https?:\/\//,''))}</a></td>
+      <td><b>${esc(t.name)}</b>${t.whatsapp && t.whatsapp.phoneNumberId ? '<span class="wachip">WhatsApp proprio</span>' : ''}${urlsOf(t.slug).map(u => `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(bare(u))}</a>`).join('')}</td>
       <td class="mono">${t.username ? esc(t.username) : '<span class="pill st-soon"><i class="dot"></i>Da creare</span>'}</td>
       <td>${esc(t.email)}</td>
       <td><span class="pill st-${st.k}"><i class="dot"></i>${st.label}</span><small>fino al ${fmt(t.subscription_end)}</small></td>
@@ -254,7 +257,7 @@ function render(){
     </tr>`;
   }).join('');
 }
-async function load(){ try { data = await api('/tenants'); $('nBase').textContent = data.base.replace(/^https?:\/\//,'') + '/'; render(); } catch (e) { toast(e.message); } }
+async function load(){ try { data = await api('/tenants'); $('nBase').textContent = bare(data.site || data.base) + '/'; render(); } catch (e) { toast(e.message); } }
 
 /* ---------- utilità dei moduli ---------- */
 function genPassword(){
@@ -296,14 +299,14 @@ $('fNew').addEventListener('submit', async (e) => {
   try {
     await api('/tenants', { body:b });
     $('dNew').close();
-    $('cUrl').textContent = `${data.base}/${b.slug}/`; $('cUser').textContent = b.username; $('cPass').textContent = b.password; $('cEnd').textContent = fmt(b.subscription_end);
+    $('cUrl').innerHTML = urlsOf(b.slug).map(esc).join('<br>'); $('cUser').textContent = b.username; $('cPass').textContent = b.password; $('cEnd').textContent = fmt(b.subscription_end);
     $('dCred').showModal();
     await load();
   } catch (ex) { showErr('nErr', ex.message); }
   $('nGo').disabled = false;
 });
 $('cCopy').onclick = async () => {
-  const t = `Indirizzo: ${$('cUrl').textContent}\nUtente: ${$('cUser').textContent}\nPassword: ${$('cPass').textContent}\nValido fino al: ${$('cEnd').textContent}`;
+  const t = `Indirizzo: ${$('cUrl').innerText.trim().replace(/\s*\n\s*/g,' oppure ')}\nUtente: ${$('cUser').textContent}\nPassword: ${$('cPass').textContent}\nValido fino al: ${$('cEnd').textContent}`;
   try { await navigator.clipboard.writeText(t); toast('Credenziali copiate'); } catch { toast('Copia non riuscita: seleziona il testo a mano'); }
 };
 
@@ -311,7 +314,7 @@ $('cCopy').onclick = async () => {
 function openEdit(id){
   const t = data.tenants.find((x) => x.id === id); if (!t) return;
   editing = t; showErr('eErr', '');
-  $('dEditT').textContent = t.name; $('eUrl').textContent = `${data.base}/${t.slug}/`.replace(/^https?:\/\//,'');
+  $('dEditT').textContent = t.name; $('eUrl').innerHTML = urlsOf(t.slug).map(u => esc(bare(u))).join(' · ');
   $('eName').value = t.name; $('eUser').value = t.username || ''; $('ePass').value = '';
   $('ePass').placeholder = t.username ? 'Lascia vuoto per non cambiarla' : 'Obbligatoria per creare l\'utente';
   $('eMail').value = t.email; $('eEnd').value = t.subscription_end; $('eSusp').checked = t.suspended; $('eFAt').checked = !!(t.features || {}).reportAtTime;
@@ -403,7 +406,7 @@ $('fEdit').addEventListener('submit', async (e) => {
   try {
     await api(`/tenants/${t.id}`, { method:'PATCH', body:b });
     $('dEdit').close();
-    if (b.password){ $('cUrl').textContent = `${data.base}/${t.slug}/`; $('cUser').textContent = b.username || t.username; $('cPass').textContent = b.password; $('cEnd').textContent = fmt(b.subscription_end || t.subscription_end); $('dCredT').textContent = 'Nuove credenziali'; $('dCred').showModal(); }
+    if (b.password){ $('cUrl').innerHTML = urlsOf(t.slug).map(esc).join('<br>'); $('cUser').textContent = b.username || t.username; $('cPass').textContent = b.password; $('cEnd').textContent = fmt(b.subscription_end || t.subscription_end); $('dCredT').textContent = 'Nuove credenziali'; $('dCred').showModal(); }
     else toast('Ambiente aggiornato');
     await load();
   } catch (ex) { showErr('eErr', ex.message); }

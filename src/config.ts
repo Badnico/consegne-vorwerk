@@ -4,6 +4,8 @@ const schema = z.object({
   PORT: z.coerce.number().default(3000),
   // Su Render l'indirizzo pubblico arriva da RENDER_EXTERNAL_URL
   PUBLIC_BASE_URL: z.string().url().default(process.env.RENDER_EXTERNAL_URL || 'http://localhost:3000'),
+  // Indirizzo "di marca" mostrato in admin accanto a quello di Render (solo sul portale principale)
+  SITE_URL: z.string().default(String(process.env.RENDER_EXTERNAL_URL || '').includes('consegne-pp81') ? 'https://www.smartconsegne.com' : ''),
   TIMEZONE: z.string().default('Europe/Rome'),
   DATABASE_URL: z.string().default('postgres://consegne:consegne@localhost:5432/consegne'),
   ADMIN_API_KEY: z.string().min(16).default('dev-admin-key-change-me'),
