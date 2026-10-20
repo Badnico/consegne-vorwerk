@@ -57,8 +57,8 @@ export async function superadminRoutes(app: FastifyInstance) {
     }).parse(req.body);
     const cur = await getWaSetting(pool, id);
     const next = b.clear || !b.phoneNumberId
-      ? { phoneNumberId: '', token: '', appSecret: '', template: '', lang: '' }
-      : { phoneNumberId: b.phoneNumberId, token: b.token || cur.token, appSecret: b.appSecret || cur.appSecret, template: b.template, lang: b.lang };
+      ? { phoneNumberId: '', token: '', appSecret: '', template: '', lang: '', waba: '' }
+      : { phoneNumberId: b.phoneNumberId, token: b.token || cur.token, appSecret: b.appSecret || cur.appSecret, template: b.template, lang: b.lang, waba: b.phoneNumberId === cur.phoneNumberId ? cur.waba : '' };
     await saveWaSetting(pool, id, next);
     return { ok: true, phoneNumberId: next.phoneNumberId, hasToken: Boolean(next.token), hasSecret: Boolean(next.appSecret) };
   });
@@ -117,6 +117,9 @@ export async function superadminRoutes(app: FastifyInstance) {
       if ((err as Error).message === 'NEED_WABA') throw new DomainError('need_waba', "Scrivi l'ID dell'account WhatsApp nel campo accanto al tasto: lo trovi in WhatsApp Manager → in alto, sotto il nome dell'account (oppure Impostazioni dell'account WhatsApp → \"ID dell'account WhatsApp Business\"). Non è l'ID del numero.", 422);
       throw new DomainError('wa_failed', `Meta risponde: ${(err as Error).message}`, 422);
     }
+    // ricorda l'account WhatsApp del numero: serve per mandare a Meta i modelli personalizzati
+    const own = link.wabas.find((x) => x.hasNumber);
+    if (own && w.phoneNumberId && own.waba !== w.waba) await saveWaSetting(pool, id, { ...w, waba: own.waba });
     return { ...link, seen: webhookSeen.get(cfg.phoneNumberId) ?? null, hasSecret: Boolean(w.appSecret || config.WHATSAPP_APP_SECRET), base: config.PUBLIC_BASE_URL };
   });
 

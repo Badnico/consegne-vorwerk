@@ -117,6 +117,49 @@ export async function linkWebhooks(c: WaConfig, wabaId?: string) {
   return { appId: d.app_id as string | undefined, app: d.application as string | undefined, wabas: out };
 }
 
+/** Chiamata JSON alle Graph API (per creare i modelli). */
+async function graphPost(token: string, path: string, body: unknown) {
+  const res = await fetch(`https://graph.facebook.com/${config.WHATSAPP_API_VERSION}/${path}`, {
+    method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  const json = (await res.json().catch(() => ({}))) as Record<string, any>;
+  if (!res.ok || json.error) {
+    const e = json.error ?? {};
+    throw new WhatsAppError(`${e.error_user_msg || e.error_user_title || e.message || `HTTP ${res.status}`}${e.code ? ` (codice ${e.code})` : ''}`, false, json);
+  }
+  return json;
+}
+
+/** Trova l'account WhatsApp (WABA) a cui appartiene il numero, dal token. Null se il token non lo dice. */
+export async function findWaba(c: WaConfig): Promise<string | null> {
+  const dbg = await graph(c.token, `debug_token?input_token=${encodeURIComponent(c.token)}`).catch(() => ({ data: {} } as Record<string, any>));
+  const ids = new Set<string>();
+  for (const g of dbg.data?.granular_scopes ?? []) if (String(g.scope).startsWith('whatsapp_business')) for (const id of g.target_ids ?? []) ids.add(String(id));
+  for (const w of ids) {
+    const nums = await graph(c.token, `${w}/phone_numbers?fields=id`).catch(() => ({ data: [] } as Record<string, any>));
+    if ((nums.data ?? []).some((n: { id: string }) => n.id === c.phoneNumberId)) return w;
+  }
+  return null;
+}
+
+/** Crea un modello "Utility" con il testo dato e i pulsanti Sì / No. */
+export function createProposalTemplate(token: string, waba: string, name: string, lang: string, body: string, examples: string[]) {
+  return graphPost(token, `${waba}/message_templates`, {
+    name, language: lang, category: 'UTILITY',
+    components: [
+      { type: 'BODY', text: body, ...(examples.length ? { example: { body_text: [examples] } } : {}) },
+      { type: 'BUTTONS', buttons: [{ type: 'QUICK_REPLY', text: 'Sì' }, { type: 'QUICK_REPLY', text: 'No' }] },
+    ],
+  }) as Promise<{ id?: string; status?: string; category?: string }>;
+}
+
+/** Stato di un modello su Meta: APPROVED, PENDING, REJECTED, PAUSED, DISABLED... */
+export async function templateStatus(token: string, waba: string, name: string) {
+  const r = await graph(token, `${waba}/message_templates?name=${encodeURIComponent(name)}&fields=name,status,rejected_reason,category,id`);
+  const t = (r.data ?? []).find((x: { name: string }) => x.name === name);
+  return t ? { status: String(t.status), reason: String(t.rejected_reason ?? ''), category: String(t.category ?? ''), id: String(t.id ?? '') } : null;
+}
+
 /** Testo libero: ammesso solo entro 24 ore dall'ultimo messaggio del cliente. */
 export function sendText(c: WaConfig, to: string, body: string) {
   return post(c, { to: toWaNumber(to), type: 'text', text: { body, preview_url: true } });

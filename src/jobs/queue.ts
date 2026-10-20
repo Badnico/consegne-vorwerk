@@ -3,6 +3,7 @@ import { config } from '../config.js';
 import { DomainError } from '../lib/errors.js';
 import { pool } from '../lib/db.js';
 import { getDelivery, markNoResponse, type Status } from '../domain/deliveries.js';
+import { refreshPendingTemplates } from '../domain/watemplate.js';
 import { claimReminder, dueTimers, releaseReminder, reminderStillDue } from '../domain/timing.js';
 import { activeTenantIds, generateSlots } from '../domain/slots.js';
 import { purgeExpiredReports, runDueReports } from '../domain/report.js';
@@ -118,6 +119,7 @@ async function registerWorkers(b: PgBoss) {
           catch (err) { if (!(err instanceof DomainError)) throw err; } // nel frattempo il cliente ha risposto
         }
       }
+      if (new Date().getMinutes() % 5 === 0) await refreshPendingTemplates().catch((e) => console.warn('[modello WhatsApp]', e));
       if (sent || expired) console.log(`[solleciti] ${sent} solleciti in invio, ${expired} consegne senza risposta`);
     } catch (err) {
       console.error('[solleciti] controllo non riuscito:', err);

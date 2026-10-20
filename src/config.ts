@@ -22,6 +22,7 @@ const schema = z.object({
   WHATSAPP_ACCESS_TOKEN: z.string().default(''),
   WHATSAPP_APP_SECRET: z.string().default(''),
   WHATSAPP_VERIFY_TOKEN: z.string().default(''),
+  WHATSAPP_WABA_ID: z.string().default(''), // account WhatsApp del numero generale (per i modelli personalizzati)
   WHATSAPP_API_VERSION: z.string().default('v21.0'),
   WHATSAPP_TEMPLATE_PROPOSAL: z.string().default('consegna_proposta'),
   WHATSAPP_TEMPLATE_LANG: z.string().default('it'),

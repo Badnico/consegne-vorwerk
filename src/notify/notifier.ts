@@ -1,4 +1,5 @@
 import { pool } from '../lib/db.js';
+import { approvedTemplate } from '../domain/watemplate.js';
 import { emailEnabled } from '../config.js';
 import { formatDateIt, hhmm, todayLocal } from '../lib/dates.js';
 import { getDelivery, type DeliveryView } from '../domain/deliveries.js';
@@ -111,7 +112,19 @@ export async function sendProposal(deliveryId: string, kind: 'proposal' | 'remin
   return deliver(
     d,
     kind,
-    (c) => wa.sendProposalTemplate(c, d.phone_e164!, [v.nome, v.azienda, v.prodotto, v.ordine, v.data, `${v.inizio} e le ${v.fine}`], `YES:${d.id}`, `NO:${d.id}`),
+    async (c) => {
+      const standard = () => wa.sendProposalTemplate(c, d.phone_e164!, [v.nome, v.azienda, v.prodotto, v.ordine, v.data, `${v.inizio} e le ${v.fine}`], `YES:${d.id}`, `NO:${d.id}`);
+      // testo personalizzato dell'azienda, se Meta l'ha approvato; se l'invio fallisce si ripiega sul modello standard
+      const own = await approvedTemplate(d.tenant_id);
+      if (!own) return standard();
+      const params = own.vars.map((k) => String((v as Record<string, string>)[k] ?? '').trim() || '-');
+      try { return await wa.sendProposalTemplate({ ...c, template: own.name, lang: 'it' }, d.phone_e164!, params, `YES:${d.id}`, `NO:${d.id}`); }
+      catch (err) {
+        if (err instanceof wa.WhatsAppError && err.retryable) throw err;
+        console.warn('[modello WhatsApp] personalizzato non riuscito, uso lo standard:', (err as Error).message);
+        return standard();
+      }
+    },
     () => {
       const subject = t(m, 'mail_subject', v);
       const text = `${t(m, 'mail_body', v)}\n\nConsegna proposta: ${v.data}, ${v.fascia}\n\n${t(m, 'mail_question', v)}\n${url}\n`;

@@ -5,6 +5,8 @@ import { emailEnabled } from '../config.js';
 import { addDays, hhmm, todayLocal } from '../lib/dates.js';
 import { DomainError } from '../lib/errors.js';
 import { listTimers } from '../domain/timing.js';
+import { refreshTemplate, submitTemplate } from '../domain/watemplate.js';
+import { saveWaTemplate } from '../domain/settings.js';
 import { actorOf, requireOperator, tenantOf } from '../lib/auth.js';
 import {
   answerPin, markNotSent, bookSlot, confirmDelivery, declineDelivery, createDelivery, deleteDelivery, deliveryEvents, getDelivery, listDeliveries,
@@ -406,6 +408,11 @@ export async function panelRoutes(app: FastifyInstance) {
     await saveFlow(pool, tenantOf(req), b);
     return b;
   });
+
+  /* Modello WhatsApp personalizzato della proposta: stato, invio a Meta, ritorno allo standard */
+  app.get('/wa-template', async (req) => ({ template: await refreshTemplate(tenantOf(req)) }));
+  app.post('/wa-template', async (req) => ({ template: await submitTemplate(tenantOf(req)) }));
+  app.delete('/wa-template', async (req) => { await saveWaTemplate(pool, tenantOf(req), null); return { template: null }; });
 
   app.get('/timers', async (req) => {
     const t = tenantOf(req);

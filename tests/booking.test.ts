@@ -550,3 +550,14 @@ test('conto alla rovescia: orari di sollecito e "Senza risposta" con i tempi att
   const off = (await listTimers(pool, T, { reminderHours: 0, noResponseHours: 5 })).find((x) => x.id === a)!;
   assert.equal(off.reminder_at, null);
 });
+
+test('modello WhatsApp personalizzato: testo trasformato per Meta e controlli prima dell\'invio', async () => {
+  const { toMetaBody, checkForMeta } = await import('../src/domain/watemplate.js');
+  const r = toMetaBody('Ciao, siamo i corrieri {prodotto} il tuo (ordine {ordine}) arriverà {data} tra le {inizio} e le {fine}.\nSarai a casa?');
+  assert.equal(r.body, 'Ciao, siamo i corrieri {{1}} il tuo (ordine {{2}}) arriverà {{3}} tra le {{4}} e le {{5}}.\nSarai a casa?');
+  assert.deepEqual(r.vars, ['prodotto', 'ordine', 'data', 'inizio', 'fine']);
+  assert.equal(checkForMeta('Ciao {nome}, arriva {data}. Sarai a casa?'), null);
+  assert.match(checkForMeta('{nome}, arriva domani. Ok?')!, /comincia/);
+  assert.match(checkForMeta('Ciao, arriva {data}')!, /finisce/);
+  assert.match(checkForMeta('Ciao {nome}{data} ok?')!, /attaccati/);
+});

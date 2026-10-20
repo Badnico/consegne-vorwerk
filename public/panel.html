@@ -240,6 +240,13 @@ a.btn{text-decoration:none;color:inherit;display:inline-flex;align-items:center}
 .filebtn input{position:absolute;inset:0;opacity:0;cursor:pointer}
 .imphead{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;margin:14px 0 8px;font-size:14px}
 .imptab{width:100%;border-collapse:collapse;font-size:13px;min-width:760px}
+.watpl{margin-top:10px;border:1px solid var(--line);border-left:4px solid var(--muted);border-radius:8px;padding:10px 12px;background:var(--sunk);font-size:13px}
+.watpl.ok{border-left-color:var(--accent)}
+.watpl.wait{border-left-color:#b7791f}
+.watpl.ko{border-left-color:#c0392b}
+.watpl p{margin:0 0 8px}
+.watpl blockquote{margin:0 0 8px;padding:6px 10px;background:var(--surface);border-radius:6px;white-space:pre-wrap}
+.watpl .btngroup{margin:0}
 .tmr{margin-top:16px;border-top:1px solid var(--line);padding-top:12px}
 .tmr h4{margin:0 0 4px;font-size:14px}
 .tmr .scroll{max-height:320px;overflow:auto}
@@ -683,7 +690,7 @@ const VARS = {azienda:'nome della tua azienda', contrassegno:'importo del contra
 // st = stato della consegna in cui il testo compare: serve all'anteprima
 const MSG_FIELDS = [
   {g:'WhatsApp', ch:'wa', items:[
-    {k:'wa_proposal', label:'Proposta di consegna', st:'inviato', rows:4, max:1024, hint:'Su WhatsApp questo primo messaggio è un modello approvato da Meta, uguale per tutte le aziende: il testo inviato è quello del modello, con il nome della tua azienda. Le modifiche qui valgono per l\'anteprima.'},
+    {k:'wa_proposal', label:'Proposta di consegna', st:'inviato', rows:4, max:1024, hint:'Su WhatsApp il primo messaggio a un cliente deve essere approvato da Meta. Scrivi il testo, premi Salva testi e poi «Invia a Meta per approvazione»: finché Meta non lo approva parte il testo standard.'},
     {k:'wa_yes', label:'Pulsante di conferma', st:'inviato', max:20, novars:true, hint:'Massimo 20 caratteri. Su WhatsApp i pulsanti sono quelli del modello approvato: Sì e No.'},
     {k:'wa_no', label:'Pulsante di rifiuto', st:'inviato', max:20, novars:true},
     {k:'wa_confirmed', label:'Risposta dopo la conferma', st:'confermato', rows:2},
@@ -733,6 +740,54 @@ async function saveTiming(){
 }
 $('saveTiming').addEventListener('click', saveTiming);
 
+/* modello WhatsApp personalizzato della proposta (approvazione Meta) */
+const waTpl = { t: undefined, at: 0, busy: false };
+const STD_WA = 'Ciao {nome}, ti scriviamo per conto di {azienda}. Il tuo {prodotto} (ordine {ordine}) arriverà {data} tra le {inizio} e le {fine}.\nSarai a casa?';
+async function loadWaTpl(){
+  try { waTpl.t = (await api('/wa-template')).template; waTpl.at = Date.now(); renderWaTpl(); } catch { /* riprova */ }
+}
+function renderWaTpl(){
+  const box = $('waTpl'); if (!box) return;
+  if (waTpl.t === undefined) { box.className = 'watpl'; box.innerHTML = '<p>Controllo lo stato del testo su Meta…</p>'; return; }
+  const t = waTpl.t, saved = (msgs.wa_proposal ?? MSG_DEFAULT.wa_proposal).trim();
+  const draft = ($('m-wa_proposal')?.value ?? saved).trim();
+  const unsaved = draft !== saved, isStd = saved === STD_WA.trim();
+  const when = iso => new Date(iso).toLocaleString('it-IT', {day:'numeric', month:'short', hour:'2-digit', minute:'2-digit'});
+  const sendBtn = (label) => `<button class="btn primary" type="button" data-wa="send" ${unsaved || isStd || waTpl.busy ? 'disabled' : ''}>${label}</button>`;
+  const why = unsaved ? '<p>Prima premi <b>Salva testi</b> in fondo alla pagina, poi potrai inviarlo a Meta.</p>' : (isStd ? '<p>È il testo standard: per inviarne uno diverso a Meta modificalo e salvalo.</p>' : '');
+  const std = `<blockquote>${esc(STD_WA)}</blockquote>`;
+  let cls = 'watpl', html;
+  if (!t) {
+    html = `<p><b>Ora su WhatsApp parte il testo standard</b> (con i dati della consegna):</p>${std}${why}<div class="btngroup">${sendBtn('Invia a Meta per approvazione')}</div>`;
+  } else if (t.status === 'APPROVED') {
+    cls += ' ok';
+    const changed = saved !== t.text.trim();
+    html = `<p><b>✓ Approvato da Meta</b>: le nuove proposte su WhatsApp partono con questo testo.${t.category && t.category !== 'UTILITY' ? ` Meta l'ha classificato come <b>${esc(t.category)}</b>: ogni invio costa più di un messaggio di servizio.` : ''}</p><blockquote>${esc(t.text)}</blockquote>` +
+      (changed ? `<p>Hai cambiato il testo: per usare quello nuovo invialo di nuovo a Meta. Fino all'approvazione resta quello qui sopra.</p>${why}` : '') +
+      `<div class="btngroup">${changed ? sendBtn('Invia il nuovo testo a Meta') : ''}<button class="btn ghost" type="button" data-wa="clear">Torna al testo standard</button></div>`;
+  } else if (t.status === 'REJECTED' || t.status === 'DISABLED') {
+    cls += ' ko';
+    html = `<p><b>✗ Meta ha rifiutato il testo</b>${t.reason && t.reason !== 'NONE' ? ` (motivo: ${esc(t.reason)})` : ''}. Su WhatsApp continua a partire il testo standard.</p><blockquote>${esc(t.text)}</blockquote>` +
+      `<p>Di solito Meta rifiuta testi che sembrano pubblicità, troppo corti rispetto ai campi tra graffe, o con frasi poco chiare. Modifica il testo, salva e invialo di nuovo.</p>${why}<div class="btngroup">${sendBtn('Invia di nuovo a Meta')}<button class="btn ghost" type="button" data-wa="clear">Torna al testo standard</button></div>`;
+  } else {
+    cls += ' wait';
+    html = `<p><b>In attesa di approvazione da Meta</b> (inviato ${esc(when(t.submittedAt))}). Di solito servono pochi minuti, a volte fino a 24 ore. Nel frattempo su WhatsApp parte il testo standard.</p><blockquote>${esc(t.text)}</blockquote>` +
+      `<div class="btngroup"><button class="btn" type="button" data-wa="check" ${waTpl.busy ? 'disabled' : ''}>Controlla adesso</button><button class="btn ghost" type="button" data-wa="clear">Annulla e torna allo standard</button></div>`;
+  }
+  box.className = cls; box.innerHTML = html;
+}
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-wa]'); if (!b) return;
+  const act = b.dataset.wa; waTpl.busy = true; renderWaTpl();
+  try {
+    if (act === 'send') { waTpl.t = (await api('/wa-template', {method:'POST', body:{}})).template; toast('Testo inviato a Meta: attendi l\'approvazione'); }
+    else if (act === 'check') { waTpl.t = (await api('/wa-template')).template; toast(waTpl.t && waTpl.t.status === 'APPROVED' ? 'Approvato da Meta' : 'Ancora in attesa'); }
+    else if (act === 'clear') { waTpl.t = (await api('/wa-template', {method:'DELETE'})).template; toast('Su WhatsApp torna il testo standard'); }
+  } catch (ex) { toast(ex.message); }
+  waTpl.busy = false; waTpl.at = Date.now(); renderWaTpl();
+});
+document.addEventListener('input', e => { if (e.target && e.target.id === 'm-wa_proposal') renderWaTpl(); });
+
 /* conto alla rovescia: dati dal server ogni 30 secondi, il timer scorre ogni secondo */
 const tmr = { items: [], skew: 0, at: 0 };
 async function loadTimers(){
@@ -774,6 +829,7 @@ function renderTimers(){
 setInterval(() => {
   if (ui.tab !== 'msg' || document.visibilityState !== 'visible') return;
   if (Date.now() - tmr.at > 30000) loadTimers(); else renderTimers();
+  if (waTpl.t && !['APPROVED','REJECTED','DISABLED'].includes(waTpl.t.status) && Date.now() - waTpl.at > 60000) loadWaTpl();
 }, 1000);
 // si salva da solo appena esci dal campo (o premi Invio), senza dover cercare il pulsante
 ['tmRem','tmNo'].forEach(id => $(id).addEventListener('change', () => { if (ui.tmDirty) saveTiming(); }));
@@ -821,10 +877,11 @@ function renderMsgEditor(){
     const input = f.rows ? `<textarea id="m-${f.k}" data-k="${f.k}" rows="${f.rows}">${val}</textarea>` : `<input id="m-${f.k}" data-k="${f.k}" value="${val}">`;
     return `<div class="mfield" id="mf-${f.k}"><div class="top"><label for="m-${f.k}">${f.label}</label>
       <span class="meta"><span class="mtag" id="mt-${f.k}" hidden>Modificato</span>${f.max ? `<span class="mono" id="mc-${f.k}"></span>` : ''}<button type="button" data-def="${f.k}">Testo predefinito</button></span></div>
-      ${input}${f.hint ? `<p class="hint">${esc(f.hint)}</p>` : ''}<p class="err" id="me-${f.k}" hidden></p></div>`;
+      ${input}${f.hint ? `<p class="hint">${esc(f.hint)}</p>` : ''}<p class="err" id="me-${f.k}" hidden></p>${f.k === 'wa_proposal' ? '<div class="watpl" id="waTpl"></div>' : ''}</div>`;
   }).join('') + `</fieldset>`).join('');
   msgDraft = null;
   validateMsgs();
+  renderWaTpl();
 }
 function readMsgs(){ const o = {}; document.querySelectorAll('#msgFields [data-k]').forEach(el => o[el.dataset.k] = el.value); return o; }
 function validateMsgs(){
@@ -880,7 +937,7 @@ $('saveMsg').onclick = async () => {
   const btn = $('saveMsg'); btn.disabled = true;
   try {
     const r = await api('/messages', {method:'PUT', body:{texts:d}});
-    msgs = {...MSG_DEFAULT, ...r.texts}; msgDraft = null; renderPhone(); toast('Testi salvati: i prossimi messaggi useranno questi');
+    msgs = {...MSG_DEFAULT, ...r.texts}; msgDraft = null; renderPhone(); renderWaTpl(); toast(waTpl.t && waTpl.t.status === 'APPROVED' && msgs.wa_proposal.trim() !== waTpl.t.text.trim() || (!waTpl.t && msgs.wa_proposal.trim() !== STD_WA.trim()) ? 'Testi salvati. Per la proposta WhatsApp premi «Invia a Meta per approvazione»' : 'Testi salvati: i prossimi messaggi useranno questi');
   } catch (e) { toast(e.message || 'Testi non salvati. Controlla la connessione e riprova.'); }
   btn.disabled = false;
 };
@@ -1204,7 +1261,7 @@ document.querySelector('.tabs').addEventListener('click', e => {
   if (ui.tab==='area' && !areaDirty) renderAreaEditor();
   if (ui.tab==='slot' && !ui.slotDirty) renderSlotEditor();
   if (ui.tab==='msg' && !msgDraft) renderMsgEditor();
-  if (ui.tab==='msg') loadTimers();
+  if (ui.tab==='msg') { loadTimers(); loadWaTpl(); }
   renderPhone();
 });
 $('wPrev').onclick = () => { ui.week = addDays(ui.week,-7); renderCal(); };

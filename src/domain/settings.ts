@@ -189,9 +189,20 @@ export const saveFlow = (db: Db, t: string, f: FlowSetting) => put(db, t, 'flow'
  * Numero WhatsApp del cliente (facoltativo). Vuoto = i messaggi partono dal numero generale impostato su Render.
  * token e appSecret servono solo se il numero è su un account Meta diverso dal tuo.
  */
-export interface WaSetting { phoneNumberId: string; token: string; appSecret: string; template: string; lang: string }
-export const WA_DEFAULT: WaSetting = { phoneNumberId: '', token: '', appSecret: '', template: '', lang: '' };
-export const getWaSetting = (db: Db, t: string) => get<WaSetting>(db, t, 'whatsapp', { ...WA_DEFAULT });
+export interface WaSetting { phoneNumberId: string; token: string; appSecret: string; template: string; lang: string; waba?: string }
+export const WA_DEFAULT: WaSetting = { phoneNumberId: '', token: '', appSecret: '', template: '', lang: '', waba: '' };
+export const getWaSetting = async (db: Db, t: string) => ({ ...WA_DEFAULT, ...(await get<Partial<WaSetting>>(db, t, 'whatsapp', {})) });
+
+/**
+ * Modello WhatsApp personalizzato della proposta (per azienda): il testo della scheda Messaggi
+ * mandato a Meta per l'approvazione. Finché non è approvato si usa il modello standard.
+ */
+export interface WaTemplateSetting {
+  name: string; id: string; text: string; vars: string[]; waba: string;
+  status: string; reason: string; category: string; submittedAt: string; checkedAt: string;
+}
+export const getWaTemplate = (db: Db, t: string) => get<WaTemplateSetting | null>(db, t, 'wa_template', null);
+export const saveWaTemplate = (db: Db, t: string, v: WaTemplateSetting | null) => put(db, t, 'wa_template', v);
 export const saveWaSetting = (db: Db, t: string, w: WaSetting) => put(db, t, 'whatsapp', w);
 /** Ambienti che hanno impostato questo numero (per il webhook). */
 export async function tenantsByPhoneNumberId(db: Db, phoneNumberId: string) {
