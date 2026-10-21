@@ -427,11 +427,14 @@ test('Excel con più fogli e colonne del gestionale (Brand, contrassegno, priori
   await out.xlsx.load((await getReportFile(pool, T2, rep.id))!.data as unknown as ArrayBuffer);
   const ws = out.worksheets[0]!;
   const hdr = (ws.getRow(1).values as unknown[]).slice(1);
-  assert.deepEqual(hdr, ['Situazione', ...head, 'AUTISTA']);
+  assert.deepEqual(hdr, ['Situazione', 'Dettaglio', 'Data consegna', 'Fascia consegna', ...head, 'AUTISTA']);
   assert.equal(ws.getRow(2).getCell(1).value, 'Da confermare');
-  const brands = [ws.getRow(2).getCell(3).value, ws.getRow(3).getCell(3).value].sort();
+  // giorno e fascia assegnati dal portale
+  assert.ok(ws.getRow(2).getCell(3).value instanceof Date);
+  assert.equal(ws.getRow(2).getCell(4).value, `${s0.start}-${s0.end}`);
+  const brands = [ws.getRow(2).getCell(6).value, ws.getRow(3).getCell(6).value].sort();
   assert.deepEqual(brands, ['BIMBY', 'FOLLETTO']);
-  const anyDate = [ws.getRow(2).getCell(15).value, ws.getRow(3).getCell(15).value].some((v) => v instanceof Date);
+  const anyDate = [ws.getRow(2).getCell(18).value, ws.getRow(3).getCell(18).value].some((v) => v instanceof Date);
   assert.ok(anyDate); // le date restano date
 });
 

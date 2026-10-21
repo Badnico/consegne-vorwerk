@@ -144,13 +144,23 @@ function valueFor(d: DeliveryView, header: string): unknown {
 function writeSourceSheet(ws: ExcelJS.Worksheet, rows: { d: DeliveryView; s: Situation }[]) {
   // colonne: tutte quelle dei fogli caricati, nell'ordine in cui compaiono
   const headers: string[] = [];
-  for (const { d } of rows) for (const c of d.source ?? []) if (!headers.includes(c.h)) headers.push(c.h);
-  ws.columns = [{ header: 'Situazione', key: 'sit', width: 15 }, ...headers.map((h, i) => ({ header: h, key: `c${i}`, width: Math.min(Math.max(h.length + 2, 10), 34) }))];
+  // le colonne che aggiunge il portale non si ripetono (succede se si ricarica un report come file di consegne)
+  const own = new Set(['situazione', 'dettaglio', 'data consegna', 'fascia consegna']);
+  for (const { d } of rows) for (const c of d.source ?? []) if (!headers.includes(c.h) && !own.has(String(c.h).trim().toLowerCase())) headers.push(c.h);
+  // dopo "Situazione": stato preciso, giorno e fascia di consegna assegnati dal portale
+  ws.columns = [
+    { header: 'Situazione', key: 'sit', width: 15 },
+    { header: 'Dettaglio', key: 'st', width: 26 },
+    { header: 'Data consegna', key: 'sdate', width: 13 },
+    { header: 'Fascia consegna', key: 'sband', width: 14 },
+    ...headers.map((h, i) => ({ header: h, key: `c${i}`, width: Math.min(Math.max(h.length + 2, 10), 34) })),
+  ];
   const head = ws.getRow(1);
   head.font = { bold: true };
   head.alignment = { vertical: 'middle', wrapText: true };
   for (const { d, s } of rows) {
-    const values: Record<string, unknown> = { sit: s };
+    const slot = slotOf(d);
+    const values: Record<string, unknown> = { sit: s, st: STATUS_IT[d.status], sdate: slot.date, sband: slot.band };
     headers.forEach((h, i) => {
       const c = d.source?.find((x) => x.h === h);
       let v: unknown = c ? c.v : d.source?.length ? null : valueFor(d, h);
@@ -161,7 +171,13 @@ function writeSourceSheet(ws: ExcelJS.Worksheet, rows: { d: DeliveryView; s: Sit
     r.getCell('sit').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: FILL[s] } };
     r.eachCell((cell) => { if (cell.value instanceof Date) cell.numFmt = 'dd/mm/yyyy'; });
   }
-  if (rows.length) ws.autoFilter = { from: 'A1', to: { row: rows.length + 1, column: headers.length + 1 } };
+  if (rows.length) ws.autoFilter = { from: 'A1', to: { row: rows.length + 1, column: headers.length + 4 } };
+}
+
+/** Giorno e fascia occupati dalla consegna (vuoti se non ne ha: da riprogrammare, fuori area). */
+function slotOf(d: DeliveryView) {
+  if (!d.slot_id || !d.date || !d.start_time || !d.end_time) return { date: null, band: '' };
+  return { date: new Date(`${d.date}T00:00:00Z`), band: `${hhmm(d.start_time)}-${hhmm(d.end_time)}` };
 }
 
 /** Genera, salva e (se impostato) manda per email il report di un ambiente. */
