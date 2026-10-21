@@ -580,3 +580,13 @@ test('modello WhatsApp: "torna allo standard" cancella davvero il modello', asyn
   await saveWaTemplate(pool, T, null);
   assert.equal(await getWaTemplate(pool, T), null);
 });
+
+test('esempi senza marchi: solo per le aziende con la funzione attiva, le altre restano come prima', async () => {
+  const { exampleProduct } = await import('../src/domain/settings.js');
+  const { templateWorkbook } = await import('../src/domain/importer.js');
+  assert.equal(exampleProduct({}, 'Bimby TM7'), 'Bimby TM7');
+  assert.equal(exampleProduct({ neutralExamples: true }, 'Bimby TM7'), 'Robot da cucina');
+  const read = async (buf: Buffer) => { const w = new ExcelJS.Workbook(); await w.xlsx.load(buf as unknown as ArrayBuffer); return JSON.stringify(w.worksheets[0]!.getRow(2).values); };
+  assert.match(await read(await templateWorkbook(['08:00-11:00'])), /Bimby TM7/);
+  assert.match(await read(await templateWorkbook(['08:00-11:00'], 'Robot da cucina')), /Robot da cucina/);
+});

@@ -524,6 +524,7 @@ const nowTime = () => { const d = new Date(); return `${pad(d.getHours())}:${pad
 let cfg = structuredClone(DEFAULT_CFG);
 let deliveries = [];
 let me = null, loaded = false;
+let stFeatures = {};
 const ui = { tab:'cal', week: monday(new Date()), simId:null, ch:'wa', view:'msg', pick:null, busy:false, slotDirty:false };
 
 const band = id => cfg.bands.find(b => b.id === id);
@@ -551,7 +552,7 @@ async function load(){
   try {
     const st = await api('/state');
     const cfgChanged = !same(cfg, st.schedule), areaChanged = !same(area, st.area), msgChanged = !same(msgs, st.messages);
-    cfg = st.schedule; area = st.area; msgs = {...MSG_DEFAULT, ...st.messages}; deliveries = st.deliveries; flow = st.flow || {askPin:true}; $('flowPin').checked = !!flow.askPin; if (st.timing && !ui.tmDirty) renderTiming(st.timing);
+    cfg = st.schedule; area = st.area; msgs = {...MSG_DEFAULT, ...st.messages}; deliveries = st.deliveries; flow = st.flow || {askPin:true}; stFeatures = st.features || {}; $('nProd').placeholder = stFeatures.neutralExamples ? 'Es. Robot da cucina' : 'Thermomix TM7'; $('flowPin').checked = !!flow.askPin; if (st.timing && !ui.tmDirty) renderTiming(st.timing);
     if (cfgChanged && !ui.slotDirty) renderSlotEditor();
     if (areaChanged && !areaDirty) renderAreaEditor();
     if (msgChanged && !msgDraft) renderMsgEditor();
@@ -1501,7 +1502,7 @@ $('fNew').addEventListener('submit', async e => {
   e.preventDefault();
   const err = $('nErr'); err.hidden = true;
   const v = id => $(id).value.trim();
-  const f = {name:v('nName'), address:v('nAddr'), cap:v('nCap'), phone:v('nPhone'), email:v('nMail'), product:v('nProd')||'Thermomix TM7', date:$('nDate').value, bandId:$('nBand').value};
+  const f = {name:v('nName'), address:v('nAddr'), cap:v('nCap'), phone:v('nPhone'), email:v('nMail'), product:v('nProd')||(stFeatures.neutralExamples ? 'prodotto' : 'Thermomix TM7'), date:$('nDate').value, bandId:$('nBand').value};
   const fail = m => { err.textContent = m; err.hidden = false; };
   if (!f.name || !f.address) return fail('Inserisci nome e indirizzo del cliente.');
   if (!/^\d{5}$/.test(f.cap)) return fail('Inserisci il CAP: 5 cifre. Serve per sapere se il cliente è nell\'area servita.');

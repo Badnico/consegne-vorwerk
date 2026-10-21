@@ -286,7 +286,7 @@ export function planSlots(rows: ImportRow[], open: { slots: SlotRow[]; first: st
 const it = (iso: string) => { const [y, m, d] = iso.split('-'); return `${d}/${m}/${y}`; };
 
 /** Modello vuoto da scaricare e compilare. */
-export async function templateWorkbook(bands: string[]): Promise<Buffer> {
+export async function templateWorkbook(bands: string[], product = 'Bimby TM7'): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('Consegne');
   ws.columns = [
@@ -306,7 +306,7 @@ export async function templateWorkbook(bands: string[]): Promise<Buffer> {
   ws.getColumn('c').numFmt = '@';
   ws.getColumn('t').numFmt = '@';
   ws.getColumn('d').numFmt = 'dd/mm/yyyy';
-  ws.addRow({ o: 'A-1001', n: 'Mario Rossi', a: 'Via Roma 1, Milano', c: '20121', t: '333 1234567', e: 'mario.rossi@esempio.it', p: 'Bimby TM7', d: '', f: bands[0] ?? '' });
+  ws.addRow({ o: 'A-1001', n: 'Mario Rossi', a: 'Via Roma 1, Milano', c: '20121', t: '333 1234567', e: 'mario.rossi@esempio.it', p: product, d: '', f: bands[0] ?? '' });
   ws.views = [{ state: 'frozen', ySplit: 1 }];
   const help = wb.addWorksheet('Istruzioni');
   help.getColumn(1).width = 110;

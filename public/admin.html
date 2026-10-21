@@ -189,6 +189,7 @@ label.f small{font-weight:400}
     </fieldset>
     <fieldset class="extras"><legend>Funzioni extra</legend>
       <label class="row" style="gap:8px"><input type="checkbox" id="eFAt"> Report Excel a orario fisso <small>(il cliente sceglie a che ora riceverlo ogni giorno)</small></label>
+      <label class="row" style="gap:8px"><input type="checkbox" id="eFNeu"> Esempi senza marchi <small>(negli esempi del portale "Robot da cucina" al posto di Thermomix/Bimby)</small></label>
     </fieldset>
     <p class="err" id="eErr" hidden></p>
     <div class="foot"><button class="btn ghost" type="button" data-close>Annulla</button><button class="btn primary" type="submit" id="eGo">Salva</button></div>
@@ -317,7 +318,7 @@ function openEdit(id){
   $('dEditT').textContent = t.name; $('eUrl').innerHTML = urlsOf(t.slug).map(u => esc(bare(u))).join(' · ');
   $('eName').value = t.name; $('eUser').value = t.username || ''; $('ePass').value = '';
   $('ePass').placeholder = t.username ? 'Lascia vuoto per non cambiarla' : 'Obbligatoria per creare l\'utente';
-  $('eMail').value = t.email; $('eEnd').value = t.subscription_end; $('eSusp').checked = t.suspended; $('eFAt').checked = !!(t.features || {}).reportAtTime;
+  $('eMail').value = t.email; $('eEnd').value = t.subscription_end; $('eSusp').checked = t.suspended; $('eFAt').checked = !!(t.features || {}).reportAtTime; $('eFNeu').checked = !!(t.features || {}).neutralExamples;
   const w = t.whatsapp || {};
   $('eWaId').value = w.phoneNumberId || ''; $('eWaTpl').value = w.template || ''; $('eWaTok').value = ''; $('eWaSec').value = ''; $('eWaTest').value = ''; $('eWaMsg').textContent = '';
   $('eWaTok').placeholder = w.hasToken ? 'Salvato ✓ — lascia vuoto per non cambiarlo' : 'Vuoto = usa il tuo token generale';
@@ -394,6 +395,7 @@ $('fEdit').addEventListener('submit', async (e) => {
   if ($('eEnd').value !== t.subscription_end) b.subscription_end = $('eEnd').value;
   if ($('eSusp').checked !== t.suspended) b.suspended = $('eSusp').checked;
   if ($('eFAt').checked !== !!(t.features || {}).reportAtTime) b.features = { reportAtTime: $('eFAt').checked };
+  if ($('eFNeu').checked !== !!(t.features || {}).neutralExamples) b.features = { ...(b.features || {}), neutralExamples: $('eFNeu').checked };
   const w = t.whatsapp || {}, waId = $('eWaId').value.trim(), waTpl = $('eWaTpl').value.trim();
   const waChanged = waId !== (w.phoneNumberId || '') || waTpl !== (w.template || '') || $('eWaTok').value || $('eWaSec').value;
   if (waChanged){

@@ -163,8 +163,10 @@ export const REPORT_DEFAULT: ReportSetting = { hours: 0, email: true, to: '', at
 
 /* ---------- funzioni extra per ambiente (si attivano dal pannello amministratore) ---------- */
 
-export interface Features { reportAtTime?: boolean }
-export const FEATURE_LABELS: Record<keyof Features, string> = { reportAtTime: 'Report Excel a orario fisso' };
+export interface Features { reportAtTime?: boolean; neutralExamples?: boolean }
+export const FEATURE_LABELS: Record<keyof Features, string> = { reportAtTime: 'Report Excel a orario fisso', neutralExamples: 'Esempi senza marchi' };
+/** Prodotto usato negli esempi del portale: generico per le aziende con "Esempi senza marchi", altrimenti quello di sempre. */
+export const exampleProduct = (f: Features, usual: string) => (f.neutralExamples ? 'Robot da cucina' : usual);
 export async function getFeatures(db: Db, tenantId: string): Promise<Features> {
   return (await db.query<{ features: Features }>('SELECT features FROM tenants WHERE id = $1', [tenantId])).rows[0]?.features ?? {};
 }

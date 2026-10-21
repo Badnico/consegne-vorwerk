@@ -16,7 +16,7 @@ import { generateSlots, replaceTemplates } from '../domain/slots.js';
 import {
   getArea, getBooking, getMessages, parseArea, saveArea, saveBooking, saveMessages, validateMessages, MESSAGE_DEFAULTS, type Messages, getTiming, saveTiming } from '../domain/settings.js';
 import { createToken, customerUrl } from '../domain/tokens.js';
-import { getFeatures, getFlow, getReportSetting, noSendMatch, saveFlow, saveReportSetting } from '../domain/settings.js';
+import { exampleProduct, getFeatures, getFlow, getReportSetting, noSendMatch, saveFlow, saveReportSetting } from '../domain/settings.js';
 import { openSlots, parseWorkbook, personKey, planSlots, templateWorkbook, type ImportRow, type PlannedRow } from '../domain/importer.js';
 import { createReport, deleteReport, getReportFile, listReports } from '../domain/report.js';
 import { conversation, FREE_WINDOW_HOURS, inboxSummary, lastInbound, markRead } from '../domain/inbox.js';
@@ -125,6 +125,7 @@ export async function panelRoutes(app: FastifyInstance) {
       messages: await getMessages(pool, t),
       flow: await getFlow(pool, t),
       timing: await getTiming(pool, t),
+      features: await getFeatures(pool, t),
       deliveries: list.map((d) => ({ ...toPanel(d, logs.get(d.id)), unread: inbox.get(d.id)?.unread ?? 0, lastIn: inbox.get(d.id)?.lastIn ?? null })),
     };
   });
@@ -294,7 +295,7 @@ export async function panelRoutes(app: FastifyInstance) {
 
   app.get('/import/template', async (req, reply) => {
     const sch = await getSchedule(tenantOf(req));
-    const buf = await templateWorkbook(sch.bands.map((b) => b.id));
+    const buf = await templateWorkbook(sch.bands.map((b) => b.id), exampleProduct(await getFeatures(pool, tenantOf(req)), 'Bimby TM7'));
     return reply.header('content-type', XLSX).header('content-disposition', attachment('modello_consegne.xlsx')).send(buf);
   });
 

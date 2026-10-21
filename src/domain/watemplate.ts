@@ -3,7 +3,7 @@ import { DomainError } from '../lib/errors.js';
 import { config } from '../config.js';
 import * as wa from '../notify/whatsapp.js';
 import { waConfigFor } from '../notify/notifier.js';
-import { getMessages, getWaSetting, getWaTemplate, saveWaSetting, saveWaTemplate, type WaTemplateSetting } from './settings.js';
+import { exampleProduct, getFeatures, getMessages, getWaSetting, getWaTemplate, saveWaSetting, saveWaTemplate, type WaTemplateSetting } from './settings.js';
 
 /**
  * Modello WhatsApp personalizzato per la proposta di consegna.
@@ -63,7 +63,8 @@ export async function submitTemplate(tenantId: string) {
   const waba = await wabaFor(tenantId, c);
   const stamp = new Date().toISOString().replace(/\D/g, '').slice(0, 12);
   const name = `proposta_${tenant.slug.replace(/[^a-z0-9]/g, '_')}_${stamp}`.slice(0, 100);
-  const examples = vars.map((k) => (k === 'azienda' ? tenant.name : EXAMPLE[k] ?? 'esempio'));
+  const prod = exampleProduct(await getFeatures(pool, tenantId), EXAMPLE.prodotto!);
+  const examples = vars.map((k) => (k === 'azienda' ? tenant.name : k === 'prodotto' ? prod : EXAMPLE[k] ?? 'esempio'));
   let r;
   try { r = await wa.createProposalTemplate(c.token, waba, name, 'it', body, examples); }
   catch (err) { throw new DomainError('wa_failed', `Meta non ha accettato il testo: ${(err as Error).message}`, 422); }
