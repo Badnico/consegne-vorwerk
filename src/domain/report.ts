@@ -68,7 +68,7 @@ export async function buildReport(db: Db, tenantId: string, tenantName: string) 
   sum.addRow(['Da confermare: il cliente non ha ancora risposto, deve scegliere la nuova data o va contattato.']);
 
   // Se le consegne arrivano da un file Excel: stesse colonne del file, con "Situazione" come prima colonna
-  if (rows.some((r) => r.d.source?.length)) writeSourceSheet(ws, rows);
+  if (rows.some((r) => r.d.source?.length)) writeSourceSheet(ws, rows, await typedMessages(db, rows.map((r) => r.d.id)));
   else writeStandardSheet(ws, rows);
 
   const fileStamp = now.toLocaleString('sv-SE', { timeZone: config.TIMEZONE }).slice(0, 16).replace(' ', '_').replace(':', '');
@@ -141,26 +141,70 @@ function valueFor(d: DeliveryView, header: string): unknown {
   }
 }
 
-function writeSourceSheet(ws: ExcelJS.Worksheet, rows: { d: DeliveryView; s: Situation }[]) {
+export const MESSAGES_HEADER = 'Messaggi cliente';
+const LAST_EVENT_HEADER = 'ultimo evento t&t';
+const norm = (h: unknown) => String(h).trim().toLowerCase();
+const MESSAGES_HEADER_KEY = Symbol('messaggi');
+
+/**
+ * Messaggi scritti dal cliente su WhatsApp con la tastiera, uno per riga con giorno e ora.
+ * Esclusi i pulsanti Sì/No (kind 'reply') e foto, vocali, documenti (tipo diverso da 'text').
+ */
+export async function typedMessages(db: Db, ids: string[]): Promise<Map<string, string>> {
+  if (!ids.length) return new Map();
+  const r = await db.query<{ delivery_id: string; body: string; created_at: Date }>(
+    `SELECT delivery_id, body, created_at FROM messages
+      WHERE delivery_id = ANY($1::uuid[]) AND direction = 'in' AND kind = 'text'
+        AND payload->>'type' = 'text' AND coalesce(btrim(body), '') <> ''
+      ORDER BY created_at, id`,
+    [ids],
+  );
+  const out = new Map<string, string[]>();
+  for (const m of r.rows) {
+    const when = new Date(m.created_at).toLocaleString('it-IT', { timeZone: config.TIMEZONE, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).replace(',', '');
+    const list = out.get(m.delivery_id) ?? [];
+    list.push(`${when} ${m.body.trim()}`);
+    out.set(m.delivery_id, list);
+  }
+  return new Map([...out].map(([k, v]) => [k, v.join('\n')]));
+}
+
+/**
+ * Ordine delle colonne del file nel report: la colonna "Messaggi cliente" prende il posto di
+ * "Ultimo Evento T&T", che si sposta due colonne più avanti (dopo la colonna che la seguiva).
+ * Se il file non ha "Ultimo Evento T&T", i messaggi vanno in fondo.
+ */
+export function sourceColumns(headers: string[]): (string | typeof MESSAGES_HEADER_KEY)[] {
+  const cols: (string | typeof MESSAGES_HEADER_KEY)[] = [...headers];
+  const i = headers.findIndex((h) => norm(h) === LAST_EVENT_HEADER);
+  if (i < 0) { cols.push(MESSAGES_HEADER_KEY); return cols; }
+  const [last] = cols.splice(i, 1, MESSAGES_HEADER_KEY);
+  cols.splice(Math.min(i + 2, cols.length), 0, last!);
+  return cols;
+}
+function writeSourceSheet(ws: ExcelJS.Worksheet, rows: { d: DeliveryView; s: Situation }[], messages: Map<string, string>) {
   // colonne: tutte quelle dei fogli caricati, nell'ordine in cui compaiono
   const headers: string[] = [];
   // le colonne che aggiunge il portale non si ripetono (succede se si ricarica un report come file di consegne)
-  const own = new Set(['situazione', 'dettaglio', 'data consegna', 'fascia consegna']);
-  for (const { d } of rows) for (const c of d.source ?? []) if (!headers.includes(c.h) && !own.has(String(c.h).trim().toLowerCase())) headers.push(c.h);
+  const own = new Set(['situazione', 'dettaglio', 'data consegna', 'fascia consegna', norm(MESSAGES_HEADER)]);
+  for (const { d } of rows) for (const c of d.source ?? []) if (!headers.includes(c.h) && !own.has(norm(c.h))) headers.push(c.h);
+  const cols = sourceColumns(headers);
   // dopo "Situazione": stato preciso, giorno e fascia di consegna assegnati dal portale
   ws.columns = [
     { header: 'Situazione', key: 'sit', width: 15 },
     { header: 'Dettaglio', key: 'st', width: 26 },
     { header: 'Data consegna', key: 'sdate', width: 13 },
     { header: 'Fascia consegna', key: 'sband', width: 14 },
-    ...headers.map((h, i) => ({ header: h, key: `c${i}`, width: Math.min(Math.max(h.length + 2, 10), 34) })),
+    ...cols.map((h) => h === MESSAGES_HEADER_KEY
+      ? { header: MESSAGES_HEADER, key: 'msg', width: 50 }
+      : { header: h, key: `c${headers.indexOf(h)}`, width: Math.min(Math.max(h.length + 2, 10), 34) }),
   ];
   const head = ws.getRow(1);
   head.font = { bold: true };
   head.alignment = { vertical: 'middle', wrapText: true };
   for (const { d, s } of rows) {
     const slot = slotOf(d);
-    const values: Record<string, unknown> = { sit: s, st: STATUS_IT[d.status], sdate: slot.date, sband: slot.band };
+    const values: Record<string, unknown> = { sit: s, st: STATUS_IT[d.status], sdate: slot.date, sband: slot.band, msg: messages.get(d.id) ?? null };
     headers.forEach((h, i) => {
       const c = d.source?.find((x) => x.h === h);
       let v: unknown = c ? c.v : d.source?.length ? null : valueFor(d, h);
@@ -169,9 +213,10 @@ function writeSourceSheet(ws: ExcelJS.Worksheet, rows: { d: DeliveryView; s: Sit
     });
     const r = ws.addRow(values);
     r.getCell('sit').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: FILL[s] } };
+    r.getCell('msg').alignment = { vertical: 'top', wrapText: true };
     r.eachCell((cell) => { if (cell.value instanceof Date) cell.numFmt = 'dd/mm/yyyy'; });
   }
-  if (rows.length) ws.autoFilter = { from: 'A1', to: { row: rows.length + 1, column: headers.length + 4 } };
+  if (rows.length) ws.autoFilter = { from: 'A1', to: { row: rows.length + 1, column: cols.length + 4 } };
 }
 
 /** Giorno e fascia occupati dalla consegna (vuoti se non ne ha: da riprogrammare, fuori area). */
