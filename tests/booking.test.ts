@@ -590,3 +590,16 @@ test('esempi senza marchi: solo per le aziende con la funzione attiva, le altre 
   assert.match(await read(await templateWorkbook(['08:00-11:00'])), /Bimby TM7/);
   assert.match(await read(await templateWorkbook(['08:00-11:00'], 'Robot da cucina')), /Robot da cucina/);
 });
+
+test('report: un file Excel per ogni file caricato, le consegne a mano a parte', async () => {
+  const s = await slot('00:45', 10);
+  await createDelivery(T2, { order_ref: order(), customer, address: 'Via A 1, Milano', slot_id: (await openSlots(pool, T2)).slots.find((x) => x.free > 0)!.id, import_file: 'Zona Nord.xlsx' }, 'test');
+  await createDelivery(T2, { order_ref: order(), customer, address: 'Via B 2, Milano', slot_id: (await openSlots(pool, T2)).slots.find((x) => x.free > 0)!.id, import_file: 'Zona Sud.xlsx' }, 'test');
+  void s;
+  const rep = await createReport(pool, T2, 'manual');
+  const names = rep.reports.map((r) => r.filename).join(' ');
+  assert.ok(rep.reports.length >= 2);
+  assert.match(names, /Zona_Nord/); assert.match(names, /Zona_Sud/);
+  const srcs = rep.reports.map((r) => r.source_file);
+  assert.ok(srcs.includes('Zona Nord.xlsx') && srcs.includes('Zona Sud.xlsx'));
+});

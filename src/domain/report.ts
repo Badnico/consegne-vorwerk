@@ -37,12 +37,37 @@ export function situationOf(d: DeliveryView, today = todayLocal()): Situation | 
 const ORDER: Situation[] = ['Da chiudere', 'Da confermare', 'Confermata'];
 const FILL: Record<Situation, string> = { 'Da chiudere': 'FFFDE2E1', 'Da confermare': 'FFFFF1D6', Confermata: 'FFE2F4EA' };
 
-export async function buildReport(db: Db, tenantId: string, tenantName: string) {
+type Row = { d: DeliveryView; s: Situation };
+
+/** Consegne del report, in ordine di situazione e data. */
+async function reportRows(db: Db, tenantId: string): Promise<Row[]> {
   const today = todayLocal();
-  const rows = (await listDeliveries(db, tenantId, {}))
+  return (await listDeliveries(db, tenantId, {}))
     .map((d) => ({ d, s: situationOf(d, today) }))
-    .filter((x): x is { d: DeliveryView; s: Situation } => x.s !== null)
+    .filter((x): x is Row => x.s !== null)
     .sort((a, b) => ORDER.indexOf(a.s) - ORDER.indexOf(b.s) || String(a.d.date ?? a.d.proposed_date).localeCompare(String(b.d.date ?? b.d.proposed_date)));
+}
+
+/** Nome del file caricato reso adatto al nome del report (senza estensione e caratteri strani). */
+const fileTag = (name: string | null) => (name ? name.replace(/\.(xlsx|xls|csv)$/i, '') : 'inserite_a_mano')
+  .normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60) || 'file';
+
+/**
+ * Un report per ogni file Excel caricato (le consegne inserite a mano in un report a parte).
+ * Con un solo file, o senza file, resta un report unico come prima.
+ */
+export async function buildReports(db: Db, tenantId: string, tenantName: string) {
+  const all = await reportRows(db, tenantId);
+  const groups = new Map<string | null, Row[]>();
+  for (const r of all) { const k = r.d.import_file ?? null; if (!groups.has(k)) groups.set(k, []); groups.get(k)!.push(r); }
+  if (groups.size <= 1) return [await buildReport(all, tenantName, [...groups.keys()][0] ?? null, false)];
+  const keys = [...groups.keys()].sort((a, b) => (a === null ? 1 : b === null ? -1 : a.localeCompare(b, 'it')));
+  const out = [];
+  for (const k of keys) out.push(await buildReport(groups.get(k)!, tenantName, k, true));
+  return out;
+}
+
+export async function buildReport(rows: Row[], tenantName: string, source: string | null = null, split = false) {
   const counts = Object.fromEntries(ORDER.map((s) => [s, rows.filter((r) => r.s === s).length])) as Record<Situation, number>;
 
   const wb = new ExcelJS.Workbook();
@@ -56,6 +81,7 @@ export async function buildReport(db: Db, tenantId: string, tenantName: string) 
   sum.getColumn(1).width = 26; sum.getColumn(2).width = 14;
   sum.addRow([tenantName]).font = { bold: true, size: 14 };
   sum.addRow([`Situazione consegne al ${stamp}`]);
+  if (split || source) sum.addRow([source ? `File caricato: ${source}` : 'Consegne inserite a mano (senza file)']);
   sum.addRow([]);
   sum.addRow(['Situazione', 'Consegne']).font = { bold: true };
   for (const s of ORDER) {
@@ -72,8 +98,8 @@ export async function buildReport(db: Db, tenantId: string, tenantName: string) 
   else writeStandardSheet(ws, rows);
 
   const fileStamp = now.toLocaleString('sv-SE', { timeZone: config.TIMEZONE }).slice(0, 16).replace(' ', '_').replace(':', '');
-  const filename = `consegne_${fileStamp}.xlsx`;
-  return { buffer: Buffer.from(await wb.xlsx.writeBuffer()), filename, rows: rows.length, counts, stamp };
+  const filename = split ? `consegne_${fileStamp}_${fileTag(source)}.xlsx` : `consegne_${fileStamp}.xlsx`;
+  return { buffer: Buffer.from(await wb.xlsx.writeBuffer()), filename, rows: rows.length, counts, stamp, source };
 }
 
 function writeStandardSheet(ws: ExcelJS.Worksheet, rows: { d: DeliveryView; s: Situation }[]) {
@@ -225,44 +251,50 @@ function slotOf(d: DeliveryView) {
   return { date: new Date(`${d.date}T00:00:00Z`), band: `${hhmm(d.start_time)}-${hhmm(d.end_time)}` };
 }
 
-/** Genera, salva e (se impostato) manda per email il report di un ambiente. */
+/** Genera, salva e (se impostato) manda per email i report di un ambiente: uno per ogni file caricato. */
 export async function createReport(db: Db, tenantId: string, trigger: 'auto' | 'time' | 'manual') {
   const t = (await db.query<{ name: string; email: string }>('SELECT name, email FROM tenants WHERE id = $1', [tenantId])).rows[0];
   if (!t) throw new Error('Ambiente non trovato');
   const setting = await getReportSetting(db, tenantId);
-  const rep = await buildReport(db, tenantId, t.name);
+  const reps = await buildReports(db, tenantId, t.name);
   const to = trigger !== 'manual' && setting.email && emailEnabled() ? (setting.to || t.email) : null;
-  const ins = await db.query<{ id: string; created_at: string }>(
-    'INSERT INTO reports (tenant_id, filename, rows, counts, trigger, emailed_to, data) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, created_at',
-    [tenantId, rep.filename, rep.rows, JSON.stringify(rep.counts), trigger, to, rep.buffer],
-  );
+  const saved: { id: string; created_at: string; filename: string; rows: number; counts: Record<Situation, number>; source_file: string | null }[] = [];
+  for (const rep of reps) {
+    const ins = await db.query<{ id: string; created_at: string }>(
+      'INSERT INTO reports (tenant_id, filename, rows, counts, trigger, emailed_to, data, source_file) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, created_at',
+      [tenantId, rep.filename, rep.rows, JSON.stringify(rep.counts), trigger, to, rep.buffer, rep.source],
+    );
+    saved.push({ id: ins.rows[0]!.id, created_at: ins.rows[0]!.created_at, filename: rep.filename, rows: rep.rows, counts: rep.counts, source_file: rep.source });
+  }
   await db.query(
     'DELETE FROM reports WHERE tenant_id = $1 AND id NOT IN (SELECT id FROM reports WHERE tenant_id = $1 ORDER BY created_at DESC LIMIT $2)',
     [tenantId, KEEP],
   );
   if (trigger === 'auto') await saveReportState(db, tenantId, { lastAuto: new Date().toISOString() });
   if (trigger === 'time') await saveReportState(db, tenantId, { lastTimeDay: todayLocal(config.TIMEZONE), lastTimeAt: setting.at });
-  console.log(`[report] creato (${trigger}) per ${t.name}${to ? ` → invio email a ${to}` : setting.email && trigger !== 'manual' && !emailEnabled() ? ' (email non configurata sul server)' : ''}`);
+  console.log(`[report] creato (${trigger}) per ${t.name}: ${reps.length} file${to ? ` → invio email a ${to}` : setting.email && trigger !== 'manual' && !emailEnabled() ? ' (email non configurata sul server)' : ''}`);
+  const stamp = reps[0]!.stamp;
   if (to) {
-    const c = rep.counts;
-    const lines = `Da chiudere: ${c['Da chiudere']}\nDa confermare: ${c['Da confermare']}\nConfermate: ${c.Confermata}`;
+    const lines = reps.map((r) => `${reps.length > 1 ? `${r.source ?? 'Inserite a mano'}: ` : ''}Da chiudere ${r.counts['Da chiudere']} · Da confermare ${r.counts['Da confermare']} · Confermate ${r.counts.Confermata}`).join('\n');
+    const intro = reps.length > 1 ? `In allegato la situazione delle consegne di ${t.name} al ${stamp}, un file per ogni file caricato.` : `In allegato la situazione delle consegne di ${t.name} al ${stamp}.`;
     try {
-      await sendEmail({ name: t.name }, to, `Situazione consegne ${rep.stamp}`,
-        `In allegato la situazione delle consegne di ${t.name} al ${rep.stamp}.\n\n${lines}\n`,
-        layout(para(`In allegato la situazione delle consegne di ${t.name} al ${rep.stamp}.`) + `<p>${esc(lines).replace(/\n/g, '<br>')}</p>`),
-        [{ filename: rep.filename, content: rep.buffer, contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }]);
+      await sendEmail({ name: t.name }, to, `Situazione consegne ${stamp}`,
+        `${intro}\n\n${lines}\n`,
+        layout(para(intro) + `<p>${esc(lines).replace(/\n/g, '<br>')}</p>`),
+        reps.map((r) => ({ filename: r.filename, content: r.buffer, contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })));
       console.log(`[report] email inviata a ${to}`);
     } catch (err) {
       console.error('[report] email non inviata', err);
-      await db.query('UPDATE reports SET emailed_to = NULL WHERE id = $1', [ins.rows[0]!.id]);
+      await db.query('UPDATE reports SET emailed_to = NULL WHERE id = ANY($1::uuid[])', [saved.map((x) => x.id)]);
     }
   }
-  return { id: ins.rows[0]!.id, created_at: ins.rows[0]!.created_at, filename: rep.filename, rows: rep.rows, counts: rep.counts, emailed_to: to };
+  const first = saved[0]!;
+  return { ...first, emailed_to: to, reports: saved };
 }
 
 export async function listReports(db: Db, tenantId: string) {
   return (await db.query<{ id: string; created_at: string; filename: string; rows: number; counts: Record<Situation, number>; trigger: string; emailed_to: string | null }>(
-    `SELECT id, created_at, created_at + interval '${RETENTION_HOURS} hours' AS expires_at, filename, rows, counts, trigger, emailed_to
+    `SELECT id, created_at, created_at + interval '${RETENTION_HOURS} hours' AS expires_at, filename, rows, counts, trigger, emailed_to, source_file
        FROM reports WHERE tenant_id = $1 AND created_at > now() - interval '${RETENTION_HOURS} hours' ORDER BY created_at DESC LIMIT 60`,
     [tenantId],
   )).rows;

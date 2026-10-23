@@ -332,7 +332,7 @@ export async function panelRoutes(app: FastifyInstance) {
       source: z.array(z.object({ h: z.string().max(200), v: z.unknown() })).max(200).default([]),
       date: isoDate.nullable(), band: time.nullable(),
     }).refine((r) => r.phone || r.email, 'Serve almeno un contatto');
-    const b = z.object({ rows: z.array(row).min(1).max(1000), bothChannels: z.boolean().optional().default(false) }).parse(req.body);
+    const b = z.object({ rows: z.array(row).min(1).max(1000), bothChannels: z.boolean().optional().default(false), fileName: z.string().trim().max(200).optional().default('') }).parse(req.body);
     const t = tenantOf(req), actor = `${actorOf(req)} (Excel)`;
     const refs = await existingRefs(t), people = await openPeople(t);
     const noSend = (await getArea(pool, t)).noSend;
@@ -355,7 +355,7 @@ export async function panelRoutes(app: FastifyInstance) {
           customer: { name: r.name, phone_e164: r.phone || null, email: r.email || null, consent_whatsapp: Boolean(r.phone) },
           address: r.address, cap: r.cap || null, product: r.product || null,
           city: r.city || null, province: r.province || null, cod_amount: r.cod_amount, pickup: r.pickup, source: r.source,
-          slot_id: await slotIdFor(t, plan.slot.date, plan.slot.bandId), both_channels: b.bothChannels,
+          slot_id: await slotIdFor(t, plan.slot.date, plan.slot.bandId), both_channels: b.bothChannels, import_file: b.fileName || null,
         }, actor, { notSent: excluded ?? undefined });
         refs.add(ref.toLowerCase()); people.add(personKey(r.name, r.address));
         if (!excluded) await enqueue.proposal(id);

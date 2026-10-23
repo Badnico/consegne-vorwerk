@@ -260,6 +260,7 @@ a.btn{text-decoration:none;color:inherit;display:inline-flex;align-items:center}
 .imptab th{text-align:left;font-weight:600;color:var(--muted);font-size:12px;padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
 .imptab td{padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}
 .imptab td small{display:block;color:var(--muted)}
+.repsrc{display:block;font-weight:600;color:var(--fg)}
 .imptab tr.bad td{background:var(--red-soft)}
 .imptab .why{color:var(--red);font-weight:600}
 .imptab tr.warnrow td{background:var(--amber-soft)}
@@ -1436,7 +1437,7 @@ $('impPrev').addEventListener('click', async e => {
   const rows = imp.rows.filter(x => impSendable(x) && !x.issue).map(({errors, slot, slotIssue, auto, sel, issue, noSend, ...r}) => noSend ? {...r, date: null, band: null} : ({...r, date: sel.date, band: sel.bandId.split('-')[0]}));
   imp.busy = true; renderImport();
   try {
-    imp.result = await api('/import/commit', {body:{rows, bothChannels: $('nBoth').checked}}); imp.rows = null;
+    imp.result = await api('/import/commit', {body:{rows, bothChannels: $('nBoth').checked, fileName: imp.file}}); imp.rows = null;
     await load();
     toast(`${imp.result.sent} ${imp.result.sent===1?'messaggio inviato':'messaggi inviati'}`);
   } catch (ex){ $('impErr').textContent = ex.message; $('impErr').hidden = false; }
@@ -1464,7 +1465,7 @@ function renderReports(full = true){
     + ((h || at) && $('repMail').checked && !repData.emailReady ? ' <span class="capout out">L\'invio email non è ancora attivo sul server: il report resta scaricabile qui sotto.</span>' : '');
   $('repList').innerHTML = repData.reports.length ? '<div class="replist">' + repData.reports.map(r => {
     const c = r.counts || {};
-    return `<div class="repitem"><span class="grow"><b>${new Date(r.created_at).toLocaleString('it-IT',{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</b><br><small>${r.trigger==='auto'?'automatico':r.trigger==='time'?'ogni giorno a orario fisso':'generato a mano'}${r.emailed_to ? ' · inviato a '+esc(r.emailed_to) : ''}</small></span>
+    return `<div class="repitem"><span class="grow"><b>${new Date(r.created_at).toLocaleString('it-IT',{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</b><br><small>${r.trigger==='auto'?'automatico':r.trigger==='time'?'ogni giorno a orario fisso':'generato a mano'}${r.emailed_to ? ' · inviato a '+esc(r.emailed_to) : ''}</small>${r.source_file ? `<small class="repsrc">File: ${esc(r.source_file)}</small>` : (r.filename || '').includes('_inserite_a_mano') ? '<small class="repsrc">Consegne inserite a mano</small>' : ''}</span>
       <span>${c['Da chiudere']||0} da chiudere · ${c['Da confermare']||0} da confermare · ${c['Confermata']||0} confermate</span>
       <span class="repexp">si cancella ${new Date(r.expires_at).toLocaleString('it-IT',{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</span>
       <a class="btn" href="/api/panel/reports/${r.id}" download>Scarica</a>
@@ -1492,7 +1493,7 @@ $('repSave').onclick = async () => {
 };
 $('repNow').onclick = async () => {
   const b = $('repNow'); b.disabled = true;
-  try { const r = await api('/reports', {method:'POST', body:{}}); await loadReports(); toast('Report creato'); location.href = `/api/panel/reports/${r.id}`; }
+  try { const r = await api('/reports', {method:'POST', body:{}}); await loadReports(); const n = (r.reports || []).length; if (n > 1) toast(`Creati ${n} report, uno per ogni file caricato: scaricali qui sotto`); else { toast('Report creato'); location.href = `/api/panel/reports/${r.id}`; } }
   catch (e){ toast(e.message); }
   b.disabled = false;
 };
