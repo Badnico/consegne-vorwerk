@@ -427,7 +427,7 @@ test('Excel con più fogli e colonne del gestionale (Brand, contrassegno, priori
   await out.xlsx.load((await getReportFile(pool, T2, rep.id))!.data as unknown as ArrayBuffer);
   const ws = out.worksheets[0]!;
   const hdr = (ws.getRow(1).values as unknown[]).slice(1);
-  assert.deepEqual(hdr, ['Situazione', 'Dettaglio', 'Data consegna', 'Fascia consegna', ...head, 'AUTISTA']);
+  assert.deepEqual(hdr, ['Situazione', 'Dettaglio', 'Data consegna', 'Fascia consegna', ...head, 'AUTISTA', 'Messaggi cliente']);
   assert.equal(ws.getRow(2).getCell(1).value, 'Da confermare');
   // giorno e fascia assegnati dal portale
   assert.ok(ws.getRow(2).getCell(3).value instanceof Date);

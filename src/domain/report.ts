@@ -60,14 +60,14 @@ export async function buildReports(db: Db, tenantId: string, tenantName: string)
   const all = await reportRows(db, tenantId);
   const groups = new Map<string | null, Row[]>();
   for (const r of all) { const k = r.d.import_file ?? null; if (!groups.has(k)) groups.set(k, []); groups.get(k)!.push(r); }
-  if (groups.size <= 1) return [await buildReport(all, tenantName, [...groups.keys()][0] ?? null, false)];
+  if (groups.size <= 1) return [await buildReport(db, all, tenantName, [...groups.keys()][0] ?? null, false)];
   const keys = [...groups.keys()].sort((a, b) => (a === null ? 1 : b === null ? -1 : a.localeCompare(b, 'it')));
   const out = [];
-  for (const k of keys) out.push(await buildReport(groups.get(k)!, tenantName, k, true));
+  for (const k of keys) out.push(await buildReport(db, groups.get(k)!, tenantName, k, true));
   return out;
 }
 
-export async function buildReport(rows: Row[], tenantName: string, source: string | null = null, split = false) {
+export async function buildReport(db: Db, rows: Row[], tenantName: string, source: string | null = null, split = false) {
   const counts = Object.fromEntries(ORDER.map((s) => [s, rows.filter((r) => r.s === s).length])) as Record<Situation, number>;
 
   const wb = new ExcelJS.Workbook();
