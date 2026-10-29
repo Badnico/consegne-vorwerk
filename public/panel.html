@@ -1158,6 +1158,56 @@ async function loadConv(id, quiet){
     renderPhone();
   } catch (e){ if (!quiet) toast(e.message); }
 }
+/** "Fuori area" perché ha risposto No alla domanda sul PIN (e non per l'indirizzo)? */
+function pinMissing(x){
+  if (!ui.conv || ui.conv.id !== x.id) return false;
+  const out = ui.conv.messages.filter(m => m.dir === 'out' && m.kind !== 'manual' && m.kind !== 'already_answered');
+  const i = out.map(m => m.kind).lastIndexOf('out_of_area');
+  return i > 0 && out[i-1].kind === 'pin_question';
+}
+/**
+ * La conversazione vera, come la vede il cliente sul telefono: i messaggi registrati con il loro orario.
+ * I messaggi inviati prima che il sistema salvasse il testo vengono ricostruiti dal testo attuale della scheda Messaggi.
+ */
+function realChat(x, list, P, C){
+  const day = d => d.toLocaleDateString('it-IT',{weekday:'long', day:'numeric', month:'long'});
+  const hm = d => d.toLocaleTimeString('it-IT',{hour:'2-digit', minute:'2-digit'});
+  const txt = s => esc(s).replace(/\n/g,'<br>').replace(/(https?:\/\/[^\s<]+)/g, '<a class="lnk" href="$1" target="_blank" rel="noopener">$1</a>');
+  const ticks = m => m.status === 'failed' ? ' · <span style="color:var(--red)">non consegnato</span>' : m.status === 'read' ? ' <span style="color:#34b7f1">✓✓</span>' : m.status === 'delivered' ? ' ✓✓' : ' ✓';
+  const lastProp = list.map(m => m.kind).reduce((a, k, i) => (k === 'proposal' || k === 'reminder') ? i : a, -1);
+  const lastPin = list.map(m => m.kind).lastIndexOf('pin_question');
+  let html = '', curDay = '', prevOut = '';
+  list.forEach((m, i) => {
+    const at = new Date(m.at), dd = day(at);
+    if (dd !== curDay){ html += `<div class="sysmsg">${esc(dd)}</div>`; curDay = dd; }
+    if (m.dir === 'in'){
+      html += `<div class="bub out${m.kind === 'text' ? ' in-text' : ''}">${txt(m.text || '')}<time>${hm(at)}</time></div>`;
+      return;
+    }
+    let body, btns = '';
+    const own = m.body != null;
+    switch (m.kind){
+      case 'proposal': case 'reminder':
+        body = own ? txt(m.body) : P('wa_proposal');
+        btns = `<div class="qr"><button data-ans="yes" ${x.status === 'inviato' && i === lastProp ? '' : 'disabled'}>${P('wa_yes')}</button><button data-ans="no" ${x.status === 'inviato' && i === lastProp ? '' : 'disabled'}>${P('wa_no')}</button></div>`;
+        break;
+      case 'pin_question':
+        body = own ? txt(m.body) : C('wa_pin_question');
+        btns = `<div class="qr"><button data-pin="pin_yes" ${x.status === 'attesa_pin' && i === lastPin ? '' : 'disabled'}>${C('wa_pin_yes')}</button><button data-pin="pin_no" ${x.status === 'attesa_pin' && i === lastPin ? '' : 'disabled'}>${C('wa_pin_no')}</button></div>`;
+        break;
+      case 'out_of_area': body = own ? txt(m.body) : C(prevOut === 'pin_question' ? 'wa_pin_missing' : 'wa_out_area'); break;
+      case 'reschedule_link': body = own ? txt(m.body) : C('wa_declined'); break;
+      case 'confirmation': body = own ? txt(m.body) : CONF(x.status === 'riprogrammato' ? 'wa_rescheduled' : 'wa_confirmed', x); break;
+      default: body = txt(m.text || '');
+    }
+    if (m.kind !== 'manual' && m.kind !== 'already_answered') prevOut = m.kind;
+    const tag = m.kind === 'reminder' ? '<small style="display:block;color:var(--muted);font-size:10px;margin-bottom:2px">Sollecito</small>' : '';
+    html += `<div class="bub">${tag}${body}<time>${hm(at)}${m.kind === 'manual' ? ' · operatore' : ''}${ticks(m)}</time>${btns}</div>`;
+  });
+  if (x.status === 'consegnata') html += `<div class="sysmsg">Consegna effettuata ✓</div>`;
+  if (x.status === 'senza_risposta') html += `<div class="sysmsg">Nessuna risposta dopo il sollecito: da contattare</div>`;
+  return html;
+}
 function convBubbles(x){
   if (!ui.conv || ui.conv.id !== x.id) return '';
   const own = ui.conv.messages.filter(m => (m.dir === 'in' && m.kind === 'text') || (m.dir === 'out' && m.kind === 'manual'));
@@ -1208,10 +1258,16 @@ function renderPhone(){
         : x.status==='attesa_pin' ? `<div class="card"><b>${C('wa_pin_question')}</b><div class="acts"><button class="btn primary" data-pin="pin_yes">${C('wa_pin_yes')}</button><button class="btn" data-pin="pin_no">${C('wa_pin_no')}</button></div></div>`
         : x.status==='confermato' ? `<div class="card">${CONF('mail_confirmed', x)}</div>`
         : x.status==='da_riprogrammare' ? `<div class="card"><b>${C('mail_reschedule')}</b><button class="lnk" data-pick>${bookingUrl(x)}</button></div>`
-        : x.status==='fuori_area' ? `<div class="card">${C('mail_out_area')}</div>`
+        : x.status==='fuori_area' ? `<div class="card">${C(pinMissing(x) ? 'mail_pin_missing' : 'mail_out_area')}</div>`
         : x.status==='consegnata' ? `<div class="card"><b>Consegna effettuata ✓</b></div>`
         : `<div class="card">${CONF('mail_rescheduled', x)}<button class="lnk" data-pick>Modifica di nuovo</button></div>`}
     </div>`;
+    return;
+  }
+  const real = ui.conv && ui.conv.id === x.id ? ui.conv.messages.filter(m => m.channel === 'whatsapp') : [];
+  if (real.length){
+    s.innerHTML = sbar + `<div class="chead"><div class="avatar">✓</div><div><b>Servizio consegne</b><small>Conversazione reale · per conto di ${esc(me?.tenant_name || '')}</small></div></div><div class="chat" id="chat">${realChat(x, real, P, C)}</div>`;
+    const c = $('chat'); c.scrollTop = c.scrollHeight;
     return;
   }
   let chat = `<div class="sysmsg">Oggi</div>
@@ -1221,7 +1277,9 @@ function renderPhone(){
   if (x.status === 'attesa_pin') chat += `<div class="bub out">${P('wa_yes')}<time>${nowTime()} ✓✓</time></div>` + pinQ(true);
   if (x.status === 'confermato') chat += `<div class="bub out">${P('wa_yes')}<time>${nowTime()} ✓✓</time></div>` + (flow.askPin ? pinQ(false) + `<div class="bub out">${C('wa_pin_yes')}<time>${nowTime()} ✓✓</time></div>` : '') + `<div class="bub">${CONF('wa_confirmed', x)}<time>${nowTime()}</time></div>`;
   if (saidNo) chat += `<div class="bub out">${P('wa_no')}<time>${nowTime()} ✓✓</time></div><div class="bub">${C('wa_declined')}<time>${nowTime()}</time></div>`;
-  if (x.status === 'fuori_area') chat += `<div class="bub out">${P('wa_no')}<time>${nowTime()} ✓✓</time></div><div class="bub">${C('wa_out_area')}<time>${nowTime()}</time></div>`;
+  if (x.status === 'fuori_area') chat += pinMissing(x)
+    ? `<div class="bub out">${P('wa_yes')}<time>${nowTime()} ✓✓</time></div>` + pinQ(false) + `<div class="bub out">${C('wa_pin_no')}<time>${nowTime()} ✓✓</time></div><div class="bub">${C('wa_pin_missing')}<time>${nowTime()}</time></div>`
+    : `<div class="bub out">${P('wa_no')}<time>${nowTime()} ✓✓</time></div><div class="bub">${C('wa_out_area')}<time>${nowTime()}</time></div>`;
   if (x.status === 'riprogrammato') chat += `<div class="bub">${CONF('wa_rescheduled', x)}<time>${nowTime()}</time></div>`;
   if (x.status === 'consegnata') chat += `<div class="sysmsg">Consegna effettuata ✓</div>`;
   if (x.status === 'senza_risposta') chat += `<div class="sysmsg">Nessuna risposta dopo il sollecito: da contattare</div>`;

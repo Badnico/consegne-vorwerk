@@ -44,12 +44,16 @@ export function messageVars(d: DeliveryView, which: 'proposed' | 'current', link
   };
 }
 
-async function record(deliveryId: string, channel: 'whatsapp' | 'email', kind: Kind, providerId: string | null, status: string, payload?: unknown) {
+/** Registra un messaggio in uscita col testo esatto inviato, così il pannello mostra quello che ha visto il cliente. */
+async function record(deliveryId: string, channel: 'whatsapp' | 'email', kind: Kind, providerId: string | null, status: string, payload?: unknown, body?: string | null) {
   await pool.query(
-    'INSERT INTO messages (delivery_id, channel, direction, kind, provider_id, status, payload) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-    [deliveryId, channel, 'out', kind, providerId, status, payload ? JSON.stringify(payload) : null],
+    'INSERT INTO messages (delivery_id, channel, direction, kind, provider_id, status, payload, body) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
+    [deliveryId, channel, 'out', kind, providerId, status, payload ? JSON.stringify(payload) : null, body ?? null],
   );
 }
+
+/** Testo inviato per canale: per WhatsApp può dipendere dal modello effettivamente usato, quindi si legge dopo l'invio. */
+type Bodies = { wa?: () => string; mail?: string };
 
 /** Numero WhatsApp da usare per un ambiente: il suo se impostato, altrimenti quello generale. */
 export async function waConfigFor(tenantId: string): Promise<wa.WaConfig | null> {
@@ -69,29 +73,32 @@ const canEmail = (d: DeliveryView) => emailEnabled() && Boolean(d.email);
  * Prova WhatsApp, poi email. Lancia se nessun canale riesce, così la coda ritenta.
  * Con "sia WhatsApp sia email" (both_channels) manda su entrambi i canali disponibili: basta che uno riesca.
  */
-async function deliver(d: DeliveryView, kind: Kind, viaWa: ((c: wa.WaConfig) => Promise<string>) | null, viaMail: () => Promise<string>) {
+async function deliver(d: DeliveryView, kind: Kind, viaWa: ((c: wa.WaConfig) => Promise<string>) | null, viaMail: () => Promise<string>, bodies: Bodies = {}) {
+  const waBody = () => bodies.wa?.() ?? null;
+  const mailBody = bodies.mail ?? null;
   const cfg = viaWa && d.phone_e164 && d.consent_whatsapp ? await waConfigFor(d.tenant_id) : null;
   if (d.both_channels && cfg && canEmail(d)) {
     let sent: 'whatsapp' | 'email' | null = null;
     let lastErr: unknown = null;
-    try { await record(d.id, 'whatsapp', kind, await viaWa!(cfg), 'sent'); sent = 'whatsapp'; }
-    catch (err) { lastErr = err; await record(d.id, 'whatsapp', kind, null, 'failed', { error: String(err) }); }
-    try { await record(d.id, 'email', kind, await viaMail(), 'sent'); sent ??= 'email'; }
-    catch (err) { lastErr = err; await record(d.id, 'email', kind, null, 'failed', { error: String(err) }); }
+    try { const id = await viaWa!(cfg); await record(d.id, 'whatsapp', kind, id, 'sent', undefined, waBody()); sent = 'whatsapp'; }
+    catch (err) { lastErr = err; await record(d.id, 'whatsapp', kind, null, 'failed', { error: String(err) }, waBody()); }
+    try { await record(d.id, 'email', kind, await viaMail(), 'sent', undefined, mailBody); sent ??= 'email'; }
+    catch (err) { lastErr = err; await record(d.id, 'email', kind, null, 'failed', { error: String(err) }, mailBody); }
     if (!sent) throw lastErr;
     return sent;
   }
   if (viaWa && cfg) {
     try {
-      await record(d.id, 'whatsapp', kind, await viaWa(cfg), 'sent');
+      const id = await viaWa(cfg);
+      await record(d.id, 'whatsapp', kind, id, 'sent', undefined, waBody());
       return 'whatsapp' as const;
     } catch (err) {
-      await record(d.id, 'whatsapp', kind, null, 'failed', { error: String(err) });
+      await record(d.id, 'whatsapp', kind, null, 'failed', { error: String(err) }, waBody());
       if (!canEmail(d)) throw err;
     }
   }
   if (canEmail(d)) {
-    await record(d.id, 'email', kind, await viaMail(), 'sent');
+    await record(d.id, 'email', kind, await viaMail(), 'sent', undefined, mailBody);
     return 'email' as const;
   }
   throw new Error(`Nessun canale disponibile per la consegna ${d.order_ref}`);
@@ -109,15 +116,19 @@ export async function sendProposal(deliveryId: string, kind: 'proposal' | 'remin
   const m = await getMessages(pool, d.tenant_id);
   const url = await linkFor(d);
   const v = messageVars(d, 'proposed', url);
+  const standardText = `Ciao ${v.nome}, ti scriviamo per conto di ${v.azienda}. Il tuo ${v.prodotto} (ordine ${v.ordine}) arriverà ${v.data} tra le ${v.inizio} e le ${v.fine}. Sarai a casa?`;
+  let waText = standardText;
+  const mailProposal = `${t(m, 'mail_body', v)}\n\nConsegna proposta: ${v.data}, ${v.fascia}\n\n${t(m, 'mail_question', v)}`;
   return deliver(
     d,
     kind,
     async (c) => {
-      const standard = () => wa.sendProposalTemplate(c, d.phone_e164!, [v.nome, v.azienda, v.prodotto, v.ordine, v.data, `${v.inizio} e le ${v.fine}`], `YES:${d.id}`, `NO:${d.id}`);
+      const standard = () => { waText = standardText; return wa.sendProposalTemplate(c, d.phone_e164!, [v.nome, v.azienda, v.prodotto, v.ordine, v.data, `${v.inizio} e le ${v.fine}`], `YES:${d.id}`, `NO:${d.id}`); };
       // testo personalizzato dell'azienda, se Meta l'ha approvato; se l'invio fallisce si ripiega sul modello standard
       const own = await approvedTemplate(d.tenant_id);
       if (!own) return standard();
       const params = own.vars.map((k) => String((v as Record<string, string>)[k] ?? '').trim() || '-');
+      waText = own.vars.reduce((txt, k, i) => txt.replaceAll(`{${k}}`, params[i]!), own.text);
       try { return await wa.sendProposalTemplate({ ...c, template: own.name, lang: 'it' }, d.phone_e164!, params, `YES:${d.id}`, `NO:${d.id}`); }
       catch (err) {
         if (err instanceof wa.WhatsAppError && err.retryable) throw err;
@@ -136,6 +147,7 @@ export async function sendProposal(deliveryId: string, kind: 'proposal' | 'remin
       );
       return sendEmail(sender(d), d.email!, subject, text, html);
     },
+    { wa: () => waText, mail: mailProposal },
   );
 }
 
@@ -151,6 +163,7 @@ export async function sendRescheduleLink(deliveryId: string) {
     (c) => wa.sendText(c, d.phone_e164!, t(m, 'wa_declined', v)),
     () => sendEmail(sender(d), d.email!, t(m, 'mail_subject', v), `${t(m, 'mail_reschedule', v)}\n${url}\n`,
       layout(`<p><strong>${t(m, 'mail_reschedule', v)}</strong></p><p>${button(url, t(m, 'mail_reschedule', v))}</p>`)),
+    { wa: () => t(m, 'wa_declined', v), mail: `${t(m, 'mail_reschedule', v)}\n${url}` },
   );
 }
 
@@ -167,6 +180,7 @@ export async function sendOutOfArea(deliveryId: string, reason: 'area' | 'pin' =
     'out_of_area',
     (c) => wa.sendText(c, d.phone_e164!, t(m, waKey, v)),
     () => sendEmail(sender(d), d.email!, t(m, 'mail_subject', v), t(m, mailKey, v), layout(para(t(m, mailKey, v)))),
+    { wa: () => t(m, waKey, v), mail: t(m, mailKey, v) },
   );
 }
 
@@ -184,6 +198,10 @@ export async function sendConfirmation(deliveryId: string) {
     () => {
       const body = confirmationText(m, d, rescheduled ? 'mail_rescheduled' : 'mail_confirmed', v);
       return sendEmail(sender(d), d.email!, t(m, 'mail_subject', v), `${body}\n\n${url}\n`, layout(para(body) + `<p><a href="${url}">Devi cambiarla?</a></p>`));
+    },
+    {
+      wa: () => confirmationText(m, d, rescheduled ? 'wa_rescheduled' : 'wa_confirmed', v),
+      mail: confirmationText(m, d, rescheduled ? 'mail_rescheduled' : 'mail_confirmed', v),
     },
   );
 }
@@ -204,6 +222,7 @@ export async function sendPinQuestion(deliveryId: string) {
     ]),
     () => sendEmail(sender(d), d.email!, t(m, 'mail_subject', v), `${t(m, 'wa_pin_question', v)}\n${url}\n`,
       layout(`<p><strong>${t(m, 'wa_pin_question', v)}</strong></p><p>${button(url, 'Rispondi')}</p>`)),
+    { wa: () => t(m, 'wa_pin_question', v), mail: t(m, 'wa_pin_question', v) },
   );
 }
 
@@ -227,6 +246,6 @@ export async function sendAlreadyAnswered(deliveryId: string) {
   } else if (['to_reschedule', 'out_of_area', 'no_response'].includes(d.status)) {
     text = 'Abbiamo già registrato la tua risposta: un nostro operatore ti contatterà per concordare la consegna. Se vuoi, scrivici qui.';
   } else return; // consegnata o annullata: nessun avviso
-  try { await record(d.id, 'whatsapp', 'already_answered', await wa.sendText(cfg, d.phone_e164, text), 'sent'); }
-  catch (err) { await record(d.id, 'whatsapp', 'already_answered', null, 'failed', { error: String(err) }); }
+  try { await record(d.id, 'whatsapp', 'already_answered', await wa.sendText(cfg, d.phone_e164, text), 'sent', undefined, text); }
+  catch (err) { await record(d.id, 'whatsapp', 'already_answered', null, 'failed', { error: String(err) }, text); }
 }

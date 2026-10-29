@@ -74,7 +74,7 @@ export async function conversation(db: Db, deliveryId: string) {
     [deliveryId],
   );
   return r.rows.map((m) => ({
-    id: m.id, dir: m.direction, kind: m.kind, channel: m.channel, status: m.status, at: m.created_at,
+    id: m.id, dir: m.direction, kind: m.kind, channel: m.channel, status: m.status, at: m.created_at, body: m.body,
     text: m.body ?? (m.direction === 'out' ? `${OUT_LABEL[m.kind] ?? m.kind}${m.channel === 'email' ? ' (email)' : ''}` : ''),
   }));
 }
