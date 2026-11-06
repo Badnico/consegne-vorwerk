@@ -1,4 +1,5 @@
 import type pg from 'pg';
+import { rememberDeleted } from './latereplies.js';
 import { pool, tx, type Db } from '../lib/db.js';
 import { DomainError, invalidState, notFound, slotFull } from '../lib/errors.js';
 import { todayLocal } from '../lib/dates.js';
@@ -280,6 +281,7 @@ export async function deleteDelivery(id: string, tenantId?: string) {
     const row = r.rows[0];
     if (!row || (tenantId && row.tenant_id !== tenantId)) throw notFound('Consegna');
     if (row.slot_id && [...HOLDS_SEAT, 'no_response'].includes(row.status)) await release(c, row.slot_id);
+    await rememberDeleted(c, id); // per riconoscere le risposte del cliente che arrivano dopo
     await c.query('DELETE FROM deliveries WHERE id = $1', [id]);
     await c.query('DELETE FROM customers c WHERE id = $1 AND NOT EXISTS (SELECT 1 FROM deliveries WHERE customer_id = c.id)', [row.customer_id]);
   });

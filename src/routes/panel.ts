@@ -20,6 +20,7 @@ import { exampleProduct, getFeatures, getFlow, getReportSetting, noSendMatch, sa
 import { openSlots, parseWorkbook, personKey, planSlots, templateWorkbook, type ImportRow, type PlannedRow } from '../domain/importer.js';
 import { createReport, deleteReport, getReportFile, listReports } from '../domain/report.js';
 import { conversation, FREE_WINDOW_HOURS, inboxSummary, lastInbound, markRead } from '../domain/inbox.js';
+import { listLateReplies, markLateRepliesSeen } from '../domain/latereplies.js';
 import { waConfigFor } from '../notify/notifier.js';
 import * as wa from '../notify/whatsapp.js';
 import { enqueue } from '../jobs/queue.js';
@@ -126,6 +127,7 @@ export async function panelRoutes(app: FastifyInstance) {
       flow: await getFlow(pool, t),
       timing: await getTiming(pool, t),
       features: await getFeatures(pool, t),
+      lateReplies: await listLateReplies(pool, t),
       deliveries: list.map((d) => ({ ...toPanel(d, logs.get(d.id)), unread: inbox.get(d.id)?.unread ?? 0, lastIn: inbox.get(d.id)?.lastIn ?? null })),
     };
   });
@@ -260,6 +262,8 @@ export async function panelRoutes(app: FastifyInstance) {
     for (const { id } of r.rows) await deleteDelivery(id, t);
     return { deleted: r.rows.length };
   });
+
+  app.post('/late-replies/seen', async (req) => { await markLateRepliesSeen(pool, tenantOf(req)); return { ok: true }; });
 
   app.post('/deliveries/delete-delivered', async (req) => {
     const t = tenantOf(req);

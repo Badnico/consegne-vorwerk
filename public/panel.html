@@ -125,6 +125,15 @@ table.cal{border-collapse:separate;border-spacing:0;width:100%;min-width:720px}
 .chipsf button b{font-family:var(--f-mono);font-weight:500;margin-left:6px}
 .chipsf button[aria-pressed="true"]{background:var(--fg);border-color:var(--fg);color:var(--bg)}
 .search{min-width:0;flex:0 1 240px;border:1px solid var(--line);border-radius:6px;padding:7px 10px;background:var(--surface);font:inherit;font-size:13px}
+.latebox{border:1px solid var(--violet);background:var(--violet-soft);border-radius:10px;padding:10px 14px;font-size:13px}
+.latebox summary{cursor:pointer;font-weight:600}
+.latebox .lr{display:grid;grid-template-columns:110px 1fr auto;gap:4px 12px;padding:8px 0;border-top:1px solid var(--line);align-items:start}
+.latebox .lr:first-of-type{margin-top:8px}
+.latebox .lr small{color:var(--muted);display:block}
+.latebox .lr .ans{font-weight:700;white-space:nowrap}
+.latebox .lr.new .ans{color:var(--violet)}
+.latebox .acts{margin-top:8px}
+@media (max-width:600px){ .latebox .lr{grid-template-columns:1fr} }
 .closebox{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;border:1px solid var(--amber);background:var(--amber-soft);border-radius:10px;padding:10px 14px;font-size:13px}
 .closebox b{font-family:var(--f-mono)}
 .bulk{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:flex-end;font-size:13px}
@@ -352,6 +361,7 @@ a.btn{text-decoration:none;color:inherit;display:inline-flex;align-items:center}
 
       <div class="pane" id="p-list" hidden>
         <div class="closebox" id="closeBox" hidden></div>
+        <details class="latebox" id="lateBox" hidden><summary id="lateSum"></summary><div id="lateList"></div></details>
         <div class="filters">
           <div class="chipsf" id="filters" role="group" aria-label="Filtra le consegne"></div>
           <input class="search" id="q" type="search" placeholder="Cerca nome, ordine o CAP" aria-label="Cerca">
@@ -533,6 +543,7 @@ const $ = id => document.getElementById(id);
 const todayIso = () => iso(new Date());
 const nowTime = () => { const d = new Date(); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
 
+let lateReplies = [];
 let cfg = structuredClone(DEFAULT_CFG);
 let deliveries = [];
 let me = null, loaded = false;
@@ -564,6 +575,7 @@ async function load(){
   try {
     const st = await api('/state');
     const cfgChanged = !same(cfg, st.schedule), areaChanged = !same(area, st.area), msgChanged = !same(msgs, st.messages);
+    lateReplies = st.lateReplies || [];
     cfg = st.schedule; area = st.area; msgs = {...MSG_DEFAULT, ...st.messages}; deliveries = st.deliveries; flow = st.flow || {askPin:true}; stFeatures = st.features || {}; $('nProd').placeholder = stFeatures.neutralExamples ? 'Es. Robot da cucina' : 'Thermomix TM7'; $('flowPin').checked = !!flow.askPin; if (st.timing && !ui.tmDirty) renderTiming(st.timing);
     if (cfgChanged && !ui.slotDirty) renderSlotEditor();
     if (areaChanged && !areaDirty) renderAreaEditor();
@@ -1025,7 +1037,27 @@ function whenCell(x){
   const done = x.status === 'consegnata' && x.deliveredAt ? `<br><small>consegnata il ${new Date(x.deliveredAt).toLocaleDateString('it-IT',{day:'numeric',month:'short'})}</small>` : '';
   return `${fmtShort(x.date)}${late}<br><small class="mono">${bandLabel(x.bandId)}</small>${done}`;
 }
+/** Risposte arrivate su WhatsApp per consegne già eliminate: l'operatore richiama il cliente. */
+function renderLate(){
+  const box = $('lateBox'), n = lateReplies.length, nNew = lateReplies.filter(r => !r.seen).length;
+  box.hidden = !n;
+  if (!n) return;
+  $('lateSum').innerHTML = `📩 ${n} ${n === 1 ? 'risposta' : 'risposte'} di clienti a consegne già eliminate` + (nNew ? ` · <b>${nNew} ${nNew === 1 ? 'nuova' : 'nuove'}</b>` : '') + ` <small style="font-weight:400;color:var(--muted)">(ultimi 30 giorni, da richiamare)</small>`;
+  const when = d => new Date(d).toLocaleString('it-IT',{weekday:'short', day:'numeric', month:'short', hour:'2-digit', minute:'2-digit'});
+  $('lateList').innerHTML = lateReplies.map(r => `<div class="lr${r.seen ? '' : ' new'}">
+      <span>${esc(when(r.at))}</span>
+      <span><b>${esc(r.name || 'Cliente')}</b>${r.order ? ` · ordine ${esc(r.order)}` : ''}
+        <small><a href="tel:${esc(r.phone)}">${esc(r.phone)}</a>${r.address ? ' · ' + esc(r.address) : ''}${r.file ? ' · file ' + esc(r.file) : ''}</small>
+        ${r.answer ? '' : `<small>"${esc(r.text)}"</small>`}</span>
+      <span class="ans">${esc(r.answer || 'Messaggio scritto')}</span>
+    </div>`).join('') + (nNew ? `<div class="acts"><button class="btn" id="lateSeen" type="button">Segna tutte come viste</button></div>` : '');
+}
+document.addEventListener('click', async e => {
+  if (e.target.id !== 'lateSeen') return;
+  try { await run(() => api('/late-replies/seen', {method:'POST', body:{}}), 'Segnate come viste'); } catch {}
+});
 function renderList(){
+  renderLate();
   // filtri con conteggi
   $('filters').innerHTML = FILTERS.map(f => `<button type="button" data-filter="${f.k}" aria-pressed="${ui.filter===f.k}">${f.label}<b>${deliveries.filter(f.test).length}</b></button>`).join('');
   const toClose = deliveries.filter(isToClose).length, cb = $('closeBox');

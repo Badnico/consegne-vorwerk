@@ -603,3 +603,25 @@ test('report: un file Excel per ogni file caricato, le consegne a mano a parte',
   const srcs = rep.reports.map((r) => r.source_file);
   assert.ok(srcs.includes('Zona Nord.xlsx') && srcs.includes('Zona Sud.xlsx'));
 });
+
+test('risposte a consegne eliminate: salvate e mostrate all\'azienda giusta', async () => {
+  const { deleteDelivery } = await import('../src/domain/deliveries.js');
+  const { recordLateReply, listLateReplies, markLateRepliesSeen } = await import('../src/domain/latereplies.js');
+  const a = await slot('01:30', 5);
+  const ref = order();
+  const id = await createDelivery(T, { order_ref: ref, customer: { name: 'Pino Late', phone_e164: '+393401112233' }, address: 'Via Tarda 3', slot_id: a }, 'test');
+  await deleteDelivery(id, T);
+  // il cliente preme "Sì" dopo l'eliminazione
+  assert.equal(await recordLateReply(pool, { deliveryId: id, providerId: 'wamid.late1', fromDigits: '393401112233', phoneNumberId: '999', answer: 'YES', body: 'Sì', payload: {} }), true);
+  assert.equal(await recordLateReply(pool, { deliveryId: id, providerId: 'wamid.late1', fromDigits: '393401112233', phoneNumberId: '999', answer: 'YES', body: 'Sì', payload: {} }), false); // duplicato
+  // poi scrive un messaggio: si riconosce dal numero
+  await recordLateReply(pool, { deliveryId: null, providerId: 'wamid.late2', fromDigits: '393401112233', phoneNumberId: '999', answer: null, body: 'a che ora arrivate?', payload: {} });
+  const list = await listLateReplies(pool, T);
+  const mine = list.filter((r) => r.order === ref);
+  assert.equal(mine.length, 2);
+  assert.ok(mine.some((r) => r.answer === 'Sì alla consegna' && r.name === 'Pino Late' && !r.seen));
+  assert.ok(mine.some((r) => r.answer === null && r.text === 'a che ora arrivate?'));
+  assert.equal((await listLateReplies(pool, T2)).filter((r) => r.order === ref).length, 0);
+  await markLateRepliesSeen(pool, T);
+  assert.ok((await listLateReplies(pool, T)).every((r) => r.seen));
+});

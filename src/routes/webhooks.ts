@@ -8,6 +8,7 @@ import { enqueue } from '../jobs/queue.js';
 import { tenantsByPhoneNumberId } from '../domain/settings.js';
 import { findDeliveryForPhone, inboundText } from '../domain/inbox.js';
 import { sendAlreadyAnswered } from '../notify/notifier.js';
+import { deliveryExists, recordLateReply } from '../domain/latereplies.js';
 
 /** Ultime chiamate di Meta per numero (in memoria): per capire dall'admin se le risposte arrivano. */
 export const webhookSeen = new Map<string, { at: string; ok: boolean }>();
@@ -80,6 +81,15 @@ export async function webhookRoutes(app: FastifyInstance) {
           const fromPayload = payload ? /:([0-9a-f-]{36})$/i.exec(payload)?.[1] ?? null : null;
           // pulsante: la consegna è nel payload; testo, foto, vocali: si cerca dal numero del cliente
           const deliveryId = fromPayload ?? (await findDeliveryForPhone(pool, msg.from, v.metadata?.phone_number_id));
+          // consegna eliminata (o mai esistita): la risposta si salva a parte e l'azienda la vede nel pannello
+          if (!deliveryId || !(await deliveryExists(pool, deliveryId))) {
+            await recordLateReply(pool, {
+              deliveryId, providerId: msg.id, fromDigits: msg.from, phoneNumberId: v.metadata?.phone_number_id,
+              answer: payload ? /^(YES|NO|PINYES|PINNO):/i.exec(payload)?.[1]?.toUpperCase() ?? null : null,
+              body: inboundText(msg), payload: msg,
+            });
+            continue;
+          }
           if (!(await recordInbound(deliveryId, msg.id, msg, fromPayload ? 'reply' : 'text', inboundText(msg)))) continue; // duplicato
           if (payload) await handleReply(payload);
         }
