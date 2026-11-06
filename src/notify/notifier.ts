@@ -8,7 +8,7 @@ import { fillText, getMessages, getWaSetting, type Messages } from '../domain/se
 import * as wa from './whatsapp.js';
 import { button, layout, para, sendEmail } from './email.js';
 
-type Kind = 'proposal' | 'reminder' | 'reschedule_link' | 'confirmation' | 'out_of_area' | 'pin_question' | 'already_answered';
+type Kind = 'proposal' | 'reminder' | 'reschedule_link' | 'confirmation' | 'out_of_area' | 'pin_question' | 'already_answered' | 'late_answer';
 
 export const formatEuro = (n: number) => n.toLocaleString('it-IT', { style: 'currency', currency: 'EUR' });
 
@@ -248,4 +248,22 @@ export async function sendAlreadyAnswered(deliveryId: string) {
   } else return; // consegnata o annullata: nessun avviso
   try { await record(d.id, 'whatsapp', 'already_answered', await wa.sendText(cfg, d.phone_e164, text), 'sent', undefined, text); }
   catch (err) { await record(d.id, 'whatsapp', 'already_answered', null, 'failed', { error: String(err) }, text); }
+}
+
+/**
+ * Risposta arrivata dopo "Senza risposta" con l'opzione "non accettare più le risposte":
+ * la consegna non cambia, il cliente riceve il testo "late_answer" (gratuito: ha appena scritto, siamo nelle 24 ore).
+ * Al massimo un avviso ogni 10 minuti per consegna.
+ */
+export async function sendLateAnswer(deliveryId: string) {
+  const d = await getDelivery(pool, deliveryId);
+  if (!d.phone_e164) return;
+  const recent = await pool.query(
+    "SELECT 1 FROM messages WHERE delivery_id = $1 AND kind = 'late_answer' AND created_at > now() - interval '10 minutes'", [deliveryId]);
+  if (recent.rowCount) return;
+  const cfg = await waConfigFor(d.tenant_id);
+  if (!cfg) return;
+  const text = t(await getMessages(pool, d.tenant_id), 'late_answer', messageVars(d, 'current'));
+  try { await record(d.id, 'whatsapp', 'late_answer', await wa.sendText(cfg, d.phone_e164, text), 'sent', undefined, text); }
+  catch (err) { await record(d.id, 'whatsapp', 'late_answer', null, 'failed', { error: String(err) }, text); }
 }

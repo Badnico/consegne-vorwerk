@@ -28,6 +28,7 @@ export const MESSAGE_DEFAULTS = {
   wa_pin_no: 'No',
   wa_pin_missing: 'Grazie per averci avvisato. Senza il PIN non possiamo completare la consegna: un nostro operatore ti contatterà a breve.',
   mail_pin_missing: "Grazie per averci avvisato.\nSenza il PIN non possiamo completare la consegna dell'ordine {ordine}: un nostro operatore ti contatterà a breve.",
+  late_answer: 'Non possiamo accettare ora la risposta e verrai contattato da un nostro operatore. Per ogni info chiama il xxx-xxxxxxx',
   extra_address: 'Indirizzo di consegna: {indirizzo}',
   extra_cod: "Ricorda che c'è il contrassegno da pagare di {contrassegno}.",
   extra_pickup: 'Ricorda di preparare al corriere il prodotto da ritirare.',
@@ -178,9 +179,13 @@ export interface ReportState { lastAuto?: string; lastTimeDay?: string; lastTime
 export const getReportState = (db: Db, t: string) => get<ReportState>(db, t, 'report_state', {});
 export const saveReportState = async (db: Db, t: string, patch: ReportState) => put(db, t, 'report_state', { ...(await getReportState(db, t)), ...patch });
 
-/** Percorso dei messaggi. askPin: dopo il Sì chiede "Hai ricevuto il PIN?" prima di confermare. */
-export interface FlowSetting { askPin: boolean }
-export const getFlow = (db: Db, t: string) => get<FlowSetting>(db, t, 'flow', { askPin: true });
+/**
+ * Percorso dei messaggi. askPin: dopo il Sì chiede "Hai ricevuto il PIN?" prima di confermare.
+ * lateLock: dopo "Senza risposta" le risposte del cliente (WhatsApp o pagina web) non si accettano più:
+ * il cliente riceve il testo "late_answer" e lo richiama un operatore.
+ */
+export interface FlowSetting { askPin: boolean; lateLock?: boolean }
+export const getFlow = (db: Db, t: string) => get<FlowSetting>(db, t, 'flow', { askPin: true, lateLock: false });
 
 /* ---------- tempi di sollecito e "senza risposta" (per azienda) ---------- */
 export interface TimingSetting { reminderHours: number; noResponseHours: number } // reminderHours 0 = nessun sollecito

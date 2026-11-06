@@ -478,6 +478,7 @@ a.btn{text-decoration:none;color:inherit;display:inline-flex;align-items:center}
             <label class="f">Segna "Senza risposta" dopo (ore dalla proposta)<input id="tmNo" type="number" min="1" max="336" step="1" inputmode="numeric"><small>Poi la consegna va richiamata. Vale anche per chi ha detto No e non sceglie la data</small></label>
           </div>
           <p class="note" id="tmNote"></p>
+          <div class="days"><label><input type="checkbox" id="flowLate"> Dopo "Senza risposta" non accettare più le risposte del cliente: riceve il testo "Risposta dopo Senza risposta" e lo richiama un operatore</label></div>
           <p class="err" id="tmErr" hidden></p>
           <div class="btngroup"><button class="btn primary" id="saveTiming" type="button">Salva tempi</button></div>
           <div class="tmr" aria-live="off">
@@ -576,7 +577,7 @@ async function load(){
     const st = await api('/state');
     const cfgChanged = !same(cfg, st.schedule), areaChanged = !same(area, st.area), msgChanged = !same(msgs, st.messages);
     lateReplies = st.lateReplies || [];
-    cfg = st.schedule; area = st.area; msgs = {...MSG_DEFAULT, ...st.messages}; deliveries = st.deliveries; flow = st.flow || {askPin:true}; stFeatures = st.features || {}; $('nProd').placeholder = stFeatures.neutralExamples ? 'Es. Robot da cucina' : 'Thermomix TM7'; $('flowPin').checked = !!flow.askPin; if (st.timing && !ui.tmDirty) renderTiming(st.timing);
+    cfg = st.schedule; area = st.area; msgs = {...MSG_DEFAULT, ...st.messages}; deliveries = st.deliveries; flow = st.flow || {askPin:true}; stFeatures = st.features || {}; $('nProd').placeholder = stFeatures.neutralExamples ? 'Es. Robot da cucina' : 'Thermomix TM7'; $('flowPin').checked = !!flow.askPin; $('flowLate').checked = !!flow.lateLock; if (st.timing && !ui.tmDirty) renderTiming(st.timing);
     if (cfgChanged && !ui.slotDirty) renderSlotEditor();
     if (areaChanged && !areaDirty) renderAreaEditor();
     if (msgChanged && !msgDraft) renderMsgEditor();
@@ -708,6 +709,7 @@ const MSG_DEFAULT = {
   wa_pin_yes: 'Sì',
   wa_pin_no: 'No',
   wa_pin_missing: 'Grazie per averci avvisato. Senza il PIN non possiamo completare la consegna: un nostro operatore ti contatterà a breve.',
+  late_answer: 'Non possiamo accettare ora la risposta e verrai contattato da un nostro operatore. Per ogni info chiama il xxx-xxxxxxx',
   mail_pin_missing: "Grazie per averci avvisato.\nSenza il PIN non possiamo completare la consegna dell'ordine {ordine}: un nostro operatore ti contatterà a breve.",
   extra_address: 'Indirizzo di consegna: {indirizzo}',
   extra_cod: "Ricorda che c'è il contrassegno da pagare di {contrassegno}.",
@@ -730,6 +732,7 @@ const MSG_FIELDS = [
     {k:'wa_pin_yes', label:'Pulsante Sì', st:'attesa_pin', max:20, novars:true},
     {k:'wa_pin_no', label:'Pulsante No', st:'attesa_pin', max:20, novars:true},
     {k:'wa_pin_missing', label:'Risposta se non ha il PIN', st:'attesa_pin', rows:3, hint:'La riceve su WhatsApp chi risponde No alla domanda sul PIN. La consegna passa a "Fuori area, da contattare" e va richiamato.'},
+    {k:'late_answer', label:'Risposta dopo "Senza risposta"', st:'senza_risposta', rows:3, hint:'Solo con la casella "Dopo Senza risposta non accettare più le risposte" accesa: la riceve su WhatsApp (o vede sulla sua pagina) chi risponde dopo la scadenza. La consegna non cambia e va richiamato.'},
   ]},
   {g:'Aggiunte al messaggio di conferma', ch:'wa', items:[
     {k:'extra_address', label:'Indirizzo di consegna', st:'confermato', rows:2, hint:'Si aggiunge sotto la conferma (se il testo della conferma non contiene già {indirizzo}).'},
@@ -862,6 +865,10 @@ setInterval(() => {
 }, 1000);
 // si salva da solo appena esci dal campo (o premi Invio), senza dover cercare il pulsante
 ['tmRem','tmNo'].forEach(id => $(id).addEventListener('change', () => { if (ui.tmDirty) saveTiming(); }));
+$('flowLate').addEventListener('change', async e => {
+  try { flow = await api('/flow', {method:'PUT', body:{lateLock: e.target.checked}}); toast(flow.lateLock ? 'Dopo "Senza risposta" le risposte non vengono più accettate' : 'Le risposte dopo "Senza risposta" vengono di nuovo accettate'); renderPhone(); }
+  catch (err){ e.target.checked = !e.target.checked; toast(err.message); }
+});
 $('flowPin').addEventListener('change', async e => {
   try { flow = await api('/flow', {method:'PUT', body:{askPin: e.target.checked}}); toast(flow.askPin ? 'Dopo il Sì verrà chiesto se ha ricevuto il PIN' : 'Domanda sul PIN spenta: il Sì conferma subito'); renderPhone(); }
   catch (err){ e.target.checked = !e.target.checked; toast(err.message); }
@@ -1314,7 +1321,7 @@ function renderPhone(){
     : `<div class="bub out">${P('wa_no')}<time>${nowTime()} ✓✓</time></div><div class="bub">${C('wa_out_area')}<time>${nowTime()}</time></div>`;
   if (x.status === 'riprogrammato') chat += `<div class="bub">${CONF('wa_rescheduled', x)}<time>${nowTime()}</time></div>`;
   if (x.status === 'consegnata') chat += `<div class="sysmsg">Consegna effettuata ✓</div>`;
-  if (x.status === 'senza_risposta') chat += `<div class="sysmsg">Nessuna risposta dopo il sollecito: da contattare</div>`;
+  if (x.status === 'senza_risposta') chat += `<div class="sysmsg">Nessuna risposta dopo il sollecito: da contattare</div>` + (flow.lateLock ? `<div class="bub out">${P('wa_yes')}<time>${nowTime()} ✓✓</time></div><div class="bub">${C('late_answer')}<time>${nowTime()}</time></div>` : '');
   chat += convBubbles(x);
   s.innerHTML = sbar + `<div class="chead"><div class="avatar">✓</div><div><b>Servizio consegne</b><small>Per conto di ${esc(me?.tenant_name || '')}</small></div></div><div class="chat" id="chat">${chat}</div>`;
   const c = $('chat'); c.scrollTop = c.scrollHeight;

@@ -7,8 +7,8 @@ import { verifySignature, type WaWebhook } from '../notify/whatsapp.js';
 import { enqueue } from '../jobs/queue.js';
 import { tenantsByPhoneNumberId } from '../domain/settings.js';
 import { findDeliveryForPhone, inboundText } from '../domain/inbox.js';
-import { sendAlreadyAnswered } from '../notify/notifier.js';
-import { deliveryExists, recordLateReply } from '../domain/latereplies.js';
+import { sendAlreadyAnswered, sendLateAnswer } from '../notify/notifier.js';
+import { deliveryExists, lateLocked, recordLateReply } from '../domain/latereplies.js';
 
 /** Ultime chiamate di Meta per numero (in memoria): per capire dall'admin se le risposte arrivano. */
 export const webhookSeen = new Map<string, { at: string; ok: boolean }>();
@@ -27,6 +27,8 @@ async function handleReply(payload: string) {
   const m = /^(YES|NO|PINYES|PINNO):([0-9a-f-]{36})$/i.exec(payload);
   if (!m) return null;
   const [, answer, deliveryId] = m as unknown as [string, string, string];
+  // dopo "Senza risposta" (se l'azienda lo ha scelto): la risposta resta registrata ma non cambia la consegna
+  if (await lateLocked(pool, deliveryId)) { await sendLateAnswer(deliveryId).catch(() => {}); return deliveryId; }
   try {
     const a = answer.toUpperCase();
     if (a === 'YES') {

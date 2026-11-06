@@ -90,3 +90,13 @@ export async function listLateReplies(db: Db, tenantId: string) {
 export async function markLateRepliesSeen(db: Db, tenantId: string) {
   await db.query('UPDATE late_replies SET seen_at = now() WHERE tenant_id = $1 AND seen_at IS NULL', [tenantId]);
 }
+
+/** La consegna è "Senza risposta" e l'azienda ha scelto di non accettare più le risposte? */
+export async function lateLocked(db: Db, deliveryId: string) {
+  const r = await db.query<{ locked: boolean }>(
+    `SELECT d.status = 'no_response' AND coalesce((s.value->>'lateLock')::boolean, false) AS locked
+       FROM deliveries d LEFT JOIN settings s ON s.tenant_id = d.tenant_id AND s.key = 'flow' WHERE d.id = $1`,
+    [deliveryId],
+  );
+  return r.rows[0]?.locked ?? false;
+}

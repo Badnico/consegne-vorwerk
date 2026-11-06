@@ -10,6 +10,8 @@ import { subscribe } from '../lib/live.js';
 import { hhmm } from '../lib/dates.js';
 import { enqueue } from '../jobs/queue.js';
 import { customerPage } from './customer-page.js';
+import { lateLocked } from '../domain/latereplies.js';
+import { DomainError } from '../lib/errors.js';
 
 const params = z.object({ token: z.string() });
 
@@ -22,7 +24,9 @@ async function publicView(d: DeliveryView) {
     "SELECT note FROM delivery_events WHERE delivery_id = $1 AND to_status = 'out_of_area' ORDER BY id DESC LIMIT 1", [d.id],
   )).rows[0]?.note?.startsWith('PIN non ricevuto') ?? false);
   const f = (k: keyof typeof m, v = cur) => fillText(m[k], v);
+  const locked = await lateLocked(pool, d.id);
   return {
+    locked,
     order_ref: d.order_ref,
     company: d.tenant_name,
     status: d.status,
@@ -39,6 +43,7 @@ async function publicView(d: DeliveryView) {
       confirmed: confirmationText(m, d, 'mail_confirmed', cur),
       rescheduled: confirmationText(m, d, 'mail_rescheduled', cur),
       out_of_area: f(pinMissing ? 'mail_pin_missing' : 'mail_out_area'),
+      late_answer: f('late_answer'),
       pin_question: f('wa_pin_question'),
       pin_yes: f('wa_pin_yes'),
       pin_no: f('wa_pin_no'),
@@ -47,6 +52,11 @@ async function publicView(d: DeliveryView) {
       page_button: m.page_button, // {data} e {fascia} li completa la pagina con lo slot scelto
     },
   };
+}
+
+/** Dopo "Senza risposta" con l'opzione attiva la pagina non accetta più risposte: mostra il testo e basta. */
+async function refuseIfLocked(id: string) {
+  if (await lateLocked(pool, id)) throw new DomainError('late_answer', 'Non possiamo accettare ora la risposta.', 409);
 }
 
 const noStore = (reply: FastifyReply) =>
@@ -78,6 +88,7 @@ export async function customerRoutes(app: FastifyInstance) {
   app.post('/r/:token/confirm', async (req, reply) => {
     const { token } = params.parse(req.params);
     const id = await resolveToken(pool, token);
+    await refuseIfLocked(id);
     // con la domanda sul PIN la pagina la mostra subito: niente messaggi finché non risponde
     if ((await confirmDelivery(id, 'customer:web')) === 'confirmed') await enqueue.afterConfirm(id);
     noStore(reply);
@@ -98,6 +109,7 @@ export async function customerRoutes(app: FastifyInstance) {
   app.post('/r/:token/decline', async (req, reply) => {
     const { token } = params.parse(req.params);
     const id = await resolveToken(pool, token);
+    await refuseIfLocked(id);
     await declineDelivery(id, 'customer:web');
     await enqueue.afterDecline(id); // link di promemoria o messaggio "fuori area"
     noStore(reply);
@@ -128,6 +140,7 @@ export async function customerRoutes(app: FastifyInstance) {
     const { token } = params.parse(req.params);
     const { slot_id } = z.object({ slot_id: z.string().uuid() }).parse(req.body);
     const id = await resolveToken(pool, token);
+    await refuseIfLocked(id);
     await bookSlot(id, slot_id, 'customer:web');
     await enqueue.afterConfirm(id);
     noStore(reply);

@@ -68,6 +68,7 @@ function render() {
     app.innerHTML = head + '<div class="card"><p>' + txt(T.rescheduled) + '</p></div>'; return;
   }
   if (state.status === 'out_of_area') { app.innerHTML = head + '<div class="card"><p>' + txt(T.out_of_area) + '</p></div>'; return; }
+  if (state.locked) { app.innerHTML = head + '<div class="card"><p>' + txt(T.late_answer) + '</p></div>'; return; }
   if (state.status === 'delivered') { app.innerHTML = head + '<div class="card"><p class="when">Consegna effettuata ✓</p></div>'; return; }
   if (state.status === 'cancelled') { app.innerHTML = head + '<div class="card"><p>Questa consegna non è più modificabile.</p></div>'; return; }
   // to_reschedule, no_response: scelta dello slot
@@ -97,8 +98,9 @@ async function act(path, body) {
   busy = true; showErr('');
   try {
     state = await api(path, body || {}); // sempre POST, anche senza dati (Sì / No)
-    if (['to_reschedule', 'no_response'].includes(state.status)) { await loadAvail(); startStream(); }
-  } catch (e) { const p = document.createElement('p'); p.className = 'err'; p.textContent = e.message; $('#app').append(p); }
+    if (['to_reschedule', 'no_response'].includes(state.status) && !state.locked) { await loadAvail(); startStream(); }
+  } catch (e) {
+    if (/accettare ora/.test(e.message)) { try { state = await api('/state'); } catch {} busy = false; pick = null; render(); return; } const p = document.createElement('p'); p.className = 'err'; p.textContent = e.message; $('#app').append(p); }
   busy = false; pick = null; render();
 }
 $('#ok').onclick = () => pick && act('/book', { slot_id: pick });
@@ -111,6 +113,6 @@ function startStream() {
   es.addEventListener('slots', () => { clearTimeout(t); t = setTimeout(loadAvail, 250); });
 }
 render();
-if (state && ['to_reschedule', 'no_response'].includes(state.status)) { loadAvail(); startStream(); }
+if (state && ['to_reschedule', 'no_response'].includes(state.status) && !state.locked) { loadAvail(); startStream(); }
 </script></body></html>`;
 }
