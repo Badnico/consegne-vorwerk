@@ -409,11 +409,9 @@ export async function panelRoutes(app: FastifyInstance) {
   });
 
   app.put('/flow', async (req) => {
-    const b = z.object({ askPin: z.boolean().optional(), lateLock: z.boolean().optional() }).parse(req.body);
-    const t = tenantOf(req);
-    const next = { ...(await getFlow(pool, t)), ...Object.fromEntries(Object.entries(b).filter(([, v]) => v !== undefined)) };
-    await saveFlow(pool, t, next);
-    return next;
+    const b = z.object({ askPin: z.boolean() }).parse(req.body);
+    await saveFlow(pool, tenantOf(req), b);
+    return b;
   });
 
   /* Modello WhatsApp personalizzato della proposta: stato, invio a Meta, ritorno allo standard */

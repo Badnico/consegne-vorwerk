@@ -91,11 +91,13 @@ export async function markLateRepliesSeen(db: Db, tenantId: string) {
   await db.query('UPDATE late_replies SET seen_at = now() WHERE tenant_id = $1 AND seen_at IS NULL', [tenantId]);
 }
 
-/** La consegna è "Senza risposta" e l'azienda ha scelto di non accettare più le risposte? */
+/**
+ * La consegna è "Senza risposta"? Da quel momento le risposte del cliente (WhatsApp o pagina web) non si accettano più:
+ * riceve il testo "late_answer" e lo richiama un operatore. Vale per tutte le aziende.
+ */
 export async function lateLocked(db: Db, deliveryId: string) {
   const r = await db.query<{ locked: boolean }>(
-    `SELECT d.status = 'no_response' AND coalesce((s.value->>'lateLock')::boolean, false) AS locked
-       FROM deliveries d LEFT JOIN settings s ON s.tenant_id = d.tenant_id AND s.key = 'flow' WHERE d.id = $1`,
+    `SELECT d.status = 'no_response' AS locked FROM deliveries d WHERE d.id = $1`,
     [deliveryId],
   );
   return r.rows[0]?.locked ?? false;

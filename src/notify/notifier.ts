@@ -251,7 +251,7 @@ export async function sendAlreadyAnswered(deliveryId: string) {
 }
 
 /**
- * Risposta arrivata dopo "Senza risposta" con l'opzione "non accettare più le risposte":
+ * Risposta arrivata dopo "Senza risposta":
  * la consegna non cambia, il cliente riceve il testo "late_answer" (gratuito: ha appena scritto, siamo nelle 24 ore).
  * Al massimo un avviso ogni 10 minuti per consegna.
  */

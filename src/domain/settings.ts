@@ -179,13 +179,9 @@ export interface ReportState { lastAuto?: string; lastTimeDay?: string; lastTime
 export const getReportState = (db: Db, t: string) => get<ReportState>(db, t, 'report_state', {});
 export const saveReportState = async (db: Db, t: string, patch: ReportState) => put(db, t, 'report_state', { ...(await getReportState(db, t)), ...patch });
 
-/**
- * Percorso dei messaggi. askPin: dopo il Sì chiede "Hai ricevuto il PIN?" prima di confermare.
- * lateLock: dopo "Senza risposta" le risposte del cliente (WhatsApp o pagina web) non si accettano più:
- * il cliente riceve il testo "late_answer" e lo richiama un operatore.
- */
-export interface FlowSetting { askPin: boolean; lateLock?: boolean }
-export const getFlow = (db: Db, t: string) => get<FlowSetting>(db, t, 'flow', { askPin: true, lateLock: false });
+/** Percorso dei messaggi. askPin: dopo il Sì chiede "Hai ricevuto il PIN?" prima di confermare. */
+export interface FlowSetting { askPin: boolean }
+export const getFlow = (db: Db, t: string) => get<FlowSetting>(db, t, 'flow', { askPin: true });
 
 /* ---------- tempi di sollecito e "senza risposta" (per azienda) ---------- */
 export interface TimingSetting { reminderHours: number; noResponseHours: number } // reminderHours 0 = nessun sollecito

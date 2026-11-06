@@ -27,7 +27,7 @@ async function handleReply(payload: string) {
   const m = /^(YES|NO|PINYES|PINNO):([0-9a-f-]{36})$/i.exec(payload);
   if (!m) return null;
   const [, answer, deliveryId] = m as unknown as [string, string, string];
-  // dopo "Senza risposta" (se l'azienda lo ha scelto): la risposta resta registrata ma non cambia la consegna
+  // dopo "Senza risposta": la risposta resta registrata ma non cambia la consegna, il cliente riceve il testo dedicato
   if (await lateLocked(pool, deliveryId)) { await sendLateAnswer(deliveryId).catch(() => {}); return deliveryId; }
   try {
     const a = answer.toUpperCase();

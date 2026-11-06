@@ -626,20 +626,14 @@ test('risposte a consegne eliminate: salvate e mostrate all\'azienda giusta', as
   assert.ok((await listLateReplies(pool, T)).every((r) => r.seen));
 });
 
-test('dopo "Senza risposta": con lateLock le risposte non si accettano più, senza resta tutto come prima', async () => {
+test('dopo "Senza risposta" le risposte del cliente non si accettano più', async () => {
   const { markNoResponse } = await import('../src/domain/deliveries.js');
   const { lateLocked } = await import('../src/domain/latereplies.js');
-  const { getFlow, saveFlow, getMessages } = await import('../src/domain/settings.js');
+  const { getMessages } = await import('../src/domain/settings.js');
   const a = await slot('02:30', 5);
   const id = await createDelivery(T, { order_ref: order(), customer: { name: 'Rita Tardi', phone_e164: '+393401119999' }, address: 'Via Lenta 1', slot_id: a }, 'test');
+  assert.equal(await lateLocked(pool, id), false); // in attesa: la risposta vale
   await markNoResponse(id);
-  assert.equal(await lateLocked(pool, id), false); // spento di base: come prima
-  const before = await getFlow(pool, T);
-  await saveFlow(pool, T, { ...before, lateLock: true });
   assert.equal(await lateLocked(pool, id), true);
   assert.match((await getMessages(pool, T)).late_answer, /Non possiamo accettare ora la risposta/);
-  assert.equal(await lateLocked(pool, id), true);
-  await saveFlow(pool, T, before);
-  assert.equal(await lateLocked(pool, id), false);
-  await confirmDelivery(id, 'test'); // senza l'opzione il Sì in ritardo conferma ancora
 });

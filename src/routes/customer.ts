@@ -54,7 +54,7 @@ async function publicView(d: DeliveryView) {
   };
 }
 
-/** Dopo "Senza risposta" con l'opzione attiva la pagina non accetta più risposte: mostra il testo e basta. */
+/** Dopo "Senza risposta" la pagina non accetta più risposte: mostra il testo e basta. */
 async function refuseIfLocked(id: string) {
   if (await lateLocked(pool, id)) throw new DomainError('late_answer', 'Non possiamo accettare ora la risposta.', 409);
 }
