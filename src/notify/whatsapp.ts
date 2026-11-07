@@ -181,6 +181,7 @@ export interface WaWebhook {
     changes?: {
       value?: {
         metadata?: { phone_number_id?: string };
+        contacts?: { wa_id?: string; profile?: { name?: string } }[];
         messages?: {
           id: string;
           from: string;

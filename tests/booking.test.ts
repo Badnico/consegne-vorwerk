@@ -637,3 +637,22 @@ test('dopo "Senza risposta" le risposte del cliente non si accettano più', asyn
   assert.equal(await lateLocked(pool, id), true);
   assert.match((await getMessages(pool, T)).late_answer, /Non possiamo accettare ora la risposta/);
 });
+
+test('nomi delle risposte a consegne eliminate: da un file Excel e dal profilo WhatsApp', async () => {
+  const { recordLateReply, listLateReplies, namesFromRows } = await import('../src/domain/latereplies.js');
+  await recordLateReply(pool, { deliveryId: null, providerId: 'wamid.nm1', fromDigits: '393405550001', phoneNumberId: undefined, answer: 'NO', body: 'No', payload: {}, waName: 'Gigi' });
+  await pool.query("UPDATE late_replies SET tenant_id = $1 WHERE provider_id = 'wamid.nm1'", [T]);
+  let r = (await listLateReplies(pool, T)).find((x) => x.phone === '+393405550001')!;
+  assert.equal(r.name, null);
+  assert.equal(r.waName, 'Gigi');
+  const res = await namesFromRows(pool, T, 'LECCE.xlsx', [
+    { phone: '+393405550001', name: 'ROSSI LUIGI', order_ref: '2660001', address: 'VIA ROMA 1, LECCE (LE)', city: 'LECCE', province: 'LE' },
+    { phone: '+393409999999', name: 'ALTRO', order_ref: '1', address: 'x', city: '', province: '' },
+  ]);
+  assert.equal(res.found, 1);
+  r = (await listLateReplies(pool, T)).find((x) => x.phone === '+393405550001')!;
+  assert.equal(r.name, 'ROSSI LUIGI');
+  assert.equal(r.order, '2660001');
+  assert.equal(r.address, 'VIA ROMA 1, LECCE (LE)');
+  assert.equal(r.file, 'LECCE.xlsx');
+});

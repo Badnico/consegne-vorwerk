@@ -48,14 +48,14 @@ async function ownerOf(db: Db, deliveryId: string | null, phone: string, phoneNu
 /** Salva la risposta; false se già registrata (Meta può mandare lo stesso evento più volte). */
 export async function recordLateReply(db: Db, args: {
   deliveryId: string | null; providerId: string; fromDigits: string; phoneNumberId: string | undefined;
-  answer: string | null; body: string; payload: unknown;
+  answer: string | null; body: string; payload: unknown; waName?: string | null;
 }) {
   const phone = '+' + args.fromDigits.replace(/\D/g, '');
   const o = await ownerOf(db, args.deliveryId, phone, args.phoneNumberId);
   const r = await db.query(
-    `INSERT INTO late_replies (tenant_id, delivery_id, provider_id, from_phone, answer, body, payload)
-     VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (provider_id) DO NOTHING`,
-    [o.tenantId, o.deliveryId, args.providerId, phone, args.answer, args.body, JSON.stringify(args.payload)],
+    `INSERT INTO late_replies (tenant_id, delivery_id, provider_id, from_phone, answer, body, payload, wa_name)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (provider_id) DO NOTHING`,
+    [o.tenantId, o.deliveryId, args.providerId, phone, args.answer, args.body, JSON.stringify(args.payload), args.waName?.trim().slice(0, 120) || null],
   );
   return (r.rowCount ?? 0) > 0;
 }
@@ -65,17 +65,23 @@ const ANSWER_LABEL: Record<string, string> = {
 };
 
 export async function listLateReplies(db: Db, tenantId: string) {
+  // nome: dalla consegna eliminata, poi da un file Excel caricato, poi dall'anagrafica clienti, infine dal profilo WhatsApp
   const r = await db.query<{
     id: string; created_at: string; seen_at: string | null; from_phone: string; answer: string | null; body: string;
-    customer_name: string | null; order_ref: string | null; address: string | null; import_file: string | null;
+    customer_name: string | null; order_ref: string | null; address: string | null; import_file: string | null; wa_name: string | null;
   }>(
-    `SELECT l.id, l.created_at, l.seen_at, l.from_phone, l.answer, l.body,
-            dd.customer_name, dd.order_ref, dd.address, dd.import_file
+    `SELECT l.id, l.created_at, l.seen_at, l.from_phone, l.answer, l.body, l.wa_name,
+            coalesce(dd.customer_name, n.name, c.name) AS customer_name,
+            coalesce(dd.order_ref, n.order_ref) AS order_ref,
+            coalesce(dd.address, n.address) AS address,
+            coalesce(dd.import_file, n.source_file) AS import_file
        FROM late_replies l
        LEFT JOIN LATERAL (
          SELECT * FROM deleted_deliveries x
-          WHERE x.tenant_id = l.tenant_id AND (x.id = l.delivery_id OR (l.delivery_id IS NULL AND x.phone_e164 = l.from_phone))
+          WHERE x.tenant_id = l.tenant_id AND (x.id = l.delivery_id OR x.phone_e164 = l.from_phone)
           ORDER BY (x.id = l.delivery_id) DESC, x.deleted_at DESC LIMIT 1) dd ON true
+       LEFT JOIN late_reply_names n ON n.tenant_id = l.tenant_id AND n.phone_e164 = l.from_phone
+       LEFT JOIN LATERAL (SELECT name FROM customers y WHERE y.tenant_id = l.tenant_id AND y.phone_e164 = l.from_phone LIMIT 1) c ON true
       WHERE l.tenant_id = $1 AND l.created_at > now() - make_interval(days => $2)
       ORDER BY l.created_at DESC LIMIT 200`,
     [tenantId, LATE_REPLY_DAYS],
@@ -83,8 +89,33 @@ export async function listLateReplies(db: Db, tenantId: string) {
   return r.rows.map((x) => ({
     id: x.id, at: x.created_at, seen: Boolean(x.seen_at), phone: x.from_phone,
     answer: x.answer ? ANSWER_LABEL[x.answer] ?? x.answer : null, text: x.body,
-    name: x.customer_name, order: x.order_ref, address: x.address, file: x.import_file,
+    name: x.customer_name, waName: x.wa_name, order: x.order_ref, address: x.address, file: x.import_file,
   }));
+}
+
+/**
+ * Riconosce i nomi da un file Excel dell'azienda (il file delle consegne caricato o un report scaricato):
+ * per ogni numero che ha scritto, salva nome, ordine e indirizzo trovati nel file. Torna quanti numeri sono stati riconosciuti.
+ */
+export async function namesFromRows(db: Db, tenantId: string, fileName: string,
+  rows: { phone: string; name: string; order_ref: string; address: string; city: string; province: string }[]) {
+  const waiting = new Set((await db.query<{ from_phone: string }>(
+    `SELECT DISTINCT from_phone FROM late_replies WHERE tenant_id = $1 AND created_at > now() - make_interval(days => $2)`,
+    [tenantId, LATE_REPLY_DAYS])).rows.map((x) => x.from_phone));
+  const found = new Set<string>();
+  for (const r of rows) {
+    if (!r.phone || !r.name || !waiting.has(r.phone) || found.has(r.phone)) continue;
+    // l'indirizzo letto dal file contiene già comune e provincia
+    const addr = r.address || [r.city, r.province && `(${r.province})`].filter(Boolean).join(' ');
+    await db.query(
+      `INSERT INTO late_reply_names (tenant_id, phone_e164, name, order_ref, address, source_file) VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (tenant_id, phone_e164) DO UPDATE SET name = EXCLUDED.name, order_ref = EXCLUDED.order_ref,
+         address = EXCLUDED.address, source_file = EXCLUDED.source_file, created_at = now()`,
+      [tenantId, r.phone, r.name.slice(0, 200), r.order_ref || null, addr.slice(0, 300) || null, fileName.slice(0, 200) || null],
+    );
+    found.add(r.phone);
+  }
+  return { found: found.size, waiting: waiting.size };
 }
 
 export async function markLateRepliesSeen(db: Db, tenantId: string) {

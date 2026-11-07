@@ -1048,12 +1048,27 @@ function renderLate(){
   const when = d => new Date(d).toLocaleString('it-IT',{weekday:'short', day:'numeric', month:'short', hour:'2-digit', minute:'2-digit'});
   $('lateList').innerHTML = lateReplies.map(r => `<div class="lr${r.seen ? '' : ' new'}">
       <span>${esc(when(r.at))}</span>
-      <span><b>${esc(r.name || 'Cliente')}</b>${r.order ? ` · ordine ${esc(r.order)}` : ''}
+      <span><b>${esc(r.name || (r.waName ? r.waName + ' (nome WhatsApp)' : 'Nome non trovato'))}</b>${r.order ? ` · ordine ${esc(r.order)}` : ''}
         <small><a href="tel:${esc(r.phone)}">${esc(r.phone)}</a>${r.address ? ' · ' + esc(r.address) : ''}${r.file ? ' · file ' + esc(r.file) : ''}</small>
         ${r.answer ? '' : `<small>"${esc(r.text)}"</small>`}</span>
       <span class="ans">${esc(r.answer || 'Messaggio scritto')}</span>
-    </div>`).join('') + (nNew ? `<div class="acts"><button class="btn" id="lateSeen" type="button">Segna tutte come viste</button></div>` : '');
+    </div>`).join('') + `<div class="acts">${nNew ? '<button class="btn" id="lateSeen" type="button">Segna tutte come viste</button> ' : ''}`
+    + (lateReplies.some(r => !r.name) ? `<label class="btn" style="cursor:pointer">Trova i nomi da un file Excel<input type="file" id="lateFile" accept=".xlsx" multiple hidden></label><small style="display:block;color:var(--muted);margin-top:4px">Carica i file Excel delle consegne (o i report scaricati): i numeri che hanno scritto vengono abbinati a nome, ordine e indirizzo.</small>` : '') + `</div>`;
 }
+document.addEventListener('change', async e => {
+  if (e.target.id !== 'lateFile') return;
+  const files = [...e.target.files]; e.target.value = ''; if (!files.length) return;
+  let found = 0, errs = [];
+  for (const f of files){
+    try {
+      if (f.size > 10 * 1024 * 1024) throw new Error('file troppo grande (massimo 10 MB)');
+      const b64 = await new Promise((ok, ko) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(',')[1] || ''); r.onerror = () => ko(new Error('non riesco a leggerlo')); r.readAsDataURL(f); });
+      found += (await api('/late-replies/names', {body:{file:b64, fileName:f.name}})).found;
+    } catch (ex){ errs.push(f.name + ': ' + ex.message); }
+  }
+  await load(); $('lateBox').open = true;
+  toast(errs.length ? `Nomi trovati: ${found}. Problemi con ${errs.join('; ')}` : `Nomi trovati: ${found}`);
+});
 document.addEventListener('click', async e => {
   if (e.target.id !== 'lateSeen') return;
   try { await run(() => api('/late-replies/seen', {method:'POST', body:{}}), 'Segnate come viste'); } catch {}

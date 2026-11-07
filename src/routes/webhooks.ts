@@ -89,6 +89,7 @@ export async function webhookRoutes(app: FastifyInstance) {
               deliveryId, providerId: msg.id, fromDigits: msg.from, phoneNumberId: v.metadata?.phone_number_id,
               answer: payload ? /^(YES|NO|PINYES|PINNO):/i.exec(payload)?.[1]?.toUpperCase() ?? null : null,
               body: inboundText(msg), payload: msg,
+              waName: v.contacts?.find((c) => c.wa_id === msg.from)?.profile?.name ?? v.contacts?.[0]?.profile?.name ?? null,
             });
             continue;
           }

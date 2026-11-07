@@ -20,7 +20,7 @@ import { exampleProduct, getFeatures, getFlow, getReportSetting, noSendMatch, sa
 import { openSlots, parseWorkbook, personKey, planSlots, templateWorkbook, type ImportRow, type PlannedRow } from '../domain/importer.js';
 import { createReport, deleteReport, getReportFile, listReports } from '../domain/report.js';
 import { conversation, FREE_WINDOW_HOURS, inboxSummary, lastInbound, markRead } from '../domain/inbox.js';
-import { listLateReplies, markLateRepliesSeen } from '../domain/latereplies.js';
+import { listLateReplies, markLateRepliesSeen, namesFromRows } from '../domain/latereplies.js';
 import { waConfigFor } from '../notify/notifier.js';
 import * as wa from '../notify/whatsapp.js';
 import { enqueue } from '../jobs/queue.js';
@@ -264,6 +264,17 @@ export async function panelRoutes(app: FastifyInstance) {
   });
 
   app.post('/late-replies/seen', async (req) => { await markLateRepliesSeen(pool, tenantOf(req)); return { ok: true }; });
+
+  /** Riconosce i nomi di chi ha risposto a consegne eliminate da un file Excel (consegne o report) dell'azienda. */
+  app.post('/late-replies/names', { bodyLimit: 15 * 1024 * 1024 }, async (req) => {
+    const b = z.object({ file: z.string().min(1).max(14 * 1024 * 1024), fileName: z.string().trim().max(200).optional().default('') }).parse(req.body);
+    let parsed;
+    try { parsed = await parseWorkbook(Buffer.from(b.file, 'base64')); }
+    catch (err) { throw new DomainError('invalid_file', (err as Error).message, 422); }
+    const rows = [...parsed.rows, ...parsed.errors];
+    if (!rows.length) throw new DomainError('empty_file', 'Nel file non trovo consegne con nome e telefono.', 422);
+    return namesFromRows(pool, tenantOf(req), b.fileName, rows);
+  });
 
   app.post('/deliveries/delete-delivered', async (req) => {
     const t = tenantOf(req);
