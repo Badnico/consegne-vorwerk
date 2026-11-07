@@ -118,6 +118,13 @@ export async function namesFromRows(db: Db, tenantId: string, fileName: string,
   return { found: found.size, waiting: waiting.size };
 }
 
+/** Elimina tutti i messaggi di un cliente (numero di telefono) dal riquadro, insieme al nome abbinato. */
+export async function deleteLateReplies(db: Db, tenantId: string, phone: string) {
+  const r = await db.query('DELETE FROM late_replies WHERE tenant_id = $1 AND from_phone = $2', [tenantId, phone]);
+  await db.query('DELETE FROM late_reply_names WHERE tenant_id = $1 AND phone_e164 = $2', [tenantId, phone]);
+  return r.rowCount ?? 0;
+}
+
 export async function markLateRepliesSeen(db: Db, tenantId: string) {
   await db.query('UPDATE late_replies SET seen_at = now() WHERE tenant_id = $1 AND seen_at IS NULL', [tenantId]);
 }

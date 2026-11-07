@@ -127,13 +127,14 @@ table.cal{border-collapse:separate;border-spacing:0;width:100%;min-width:720px}
 .search{min-width:0;flex:0 1 240px;border:1px solid var(--line);border-radius:6px;padding:7px 10px;background:var(--surface);font:inherit;font-size:13px}
 .latebox{border:1px solid var(--violet);background:var(--violet-soft);border-radius:10px;padding:10px 14px;font-size:13px}
 .latebox summary{cursor:pointer;font-weight:600}
-.latebox .lr{display:grid;grid-template-columns:110px 1fr auto;gap:4px 12px;padding:8px 0;border-top:1px solid var(--line);align-items:start}
+.latebox .lr{display:grid;grid-template-columns:110px 1fr auto auto;gap:4px 12px;padding:8px 0;border-top:1px solid var(--line);align-items:start}
 .latebox .lr:first-of-type{margin-top:8px}
 .latebox .lr small{color:var(--muted);display:block}
 .latebox .lr .ans{font-weight:700;white-space:nowrap}
 .latebox .lr.new .ans{color:var(--violet)}
 .latebox .acts{margin-top:8px}
 @media (max-width:600px){ .latebox .lr{grid-template-columns:1fr} }
+.latebox .lr .btn{padding:4px 10px;font-size:12px}
 .closebox{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;border:1px solid var(--amber);background:var(--amber-soft);border-radius:10px;padding:10px 14px;font-size:13px}
 .closebox b{font-family:var(--f-mono)}
 .bulk{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:flex-end;font-size:13px}
@@ -1052,6 +1053,9 @@ function renderLate(){
         <small><a href="tel:${esc(r.phone)}">${esc(r.phone)}</a>${r.address ? ' · ' + esc(r.address) : ''}${r.file ? ' · file ' + esc(r.file) : ''}</small>
         ${r.answer ? '' : `<small>"${esc(r.text)}"</small>`}</span>
       <span class="ans">${esc(r.answer || 'Messaggio scritto')}</span>
+      <span>${ui.lateDel === r.phone
+        ? `<button class="btn danger" type="button" data-latedel-ok="${esc(r.phone)}">Conferma: elimina ${lateReplies.filter(y => y.phone === r.phone).length > 1 ? 'tutti i suoi messaggi' : ''}</button> <button class="btn ghost" type="button" data-latedel-no="1">Annulla</button>`
+        : `<button class="btn ghost danger" type="button" data-latedel="${esc(r.phone)}" title="Elimina questo cliente dal riquadro">Elimina</button>`}</span>
     </div>`).join('') + `<div class="acts">${nNew ? '<button class="btn" id="lateSeen" type="button">Segna tutte come viste</button> ' : ''}`
     + (lateReplies.some(r => !r.name) ? `<label class="btn" style="cursor:pointer">Trova i nomi da un file Excel<input type="file" id="lateFile" accept=".xlsx" multiple hidden></label><small style="display:block;color:var(--muted);margin-top:4px">Carica i file Excel delle consegne (o i report scaricati): i numeri che hanno scritto vengono abbinati a nome, ordine e indirizzo.</small>` : '') + `</div>`;
 }
@@ -1068,6 +1072,16 @@ document.addEventListener('change', async e => {
   }
   await load(); $('lateBox').open = true;
   toast(errs.length ? `Nomi trovati: ${found}. Problemi con ${errs.join('; ')}` : `Nomi trovati: ${found}`);
+});
+document.addEventListener('click', async e => {
+  const t = e.target.closest('[data-latedel],[data-latedel-ok],[data-latedel-no]');
+  if (!t) return;
+  e.preventDefault();
+  if (t.dataset.latedel){ ui.lateDel = t.dataset.latedel; renderLate(); return; }
+  if (t.dataset.latedelNo){ ui.lateDel = null; renderLate(); return; }
+  const phone = t.dataset.latedelOk; ui.lateDel = null;
+  try { const r = await api('/late-replies/delete', {method:'POST', body:{phone}}); lateReplies = lateReplies.filter(y => y.phone !== phone); renderLate(); $('lateBox').open = lateReplies.length > 0; toast(r.deleted === 1 ? 'Cliente eliminato dal riquadro' : `Cliente eliminato dal riquadro (${r.deleted} messaggi)`); }
+  catch (ex){ toast(ex.message); renderLate(); }
 });
 document.addEventListener('click', async e => {
   if (e.target.id !== 'lateSeen') return;

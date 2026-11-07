@@ -20,7 +20,7 @@ import { exampleProduct, getFeatures, getFlow, getReportSetting, noSendMatch, sa
 import { openSlots, parseWorkbook, personKey, planSlots, templateWorkbook, type ImportRow, type PlannedRow } from '../domain/importer.js';
 import { createReport, deleteReport, getReportFile, listReports } from '../domain/report.js';
 import { conversation, FREE_WINDOW_HOURS, inboxSummary, lastInbound, markRead } from '../domain/inbox.js';
-import { listLateReplies, markLateRepliesSeen, namesFromRows } from '../domain/latereplies.js';
+import { deleteLateReplies, listLateReplies, markLateRepliesSeen, namesFromRows } from '../domain/latereplies.js';
 import { waConfigFor } from '../notify/notifier.js';
 import * as wa from '../notify/whatsapp.js';
 import { enqueue } from '../jobs/queue.js';
@@ -264,6 +264,12 @@ export async function panelRoutes(app: FastifyInstance) {
   });
 
   app.post('/late-replies/seen', async (req) => { await markLateRepliesSeen(pool, tenantOf(req)); return { ok: true }; });
+
+  /** Elimina dal riquadro tutti i messaggi di un cliente (per numero di telefono). */
+  app.post('/late-replies/delete', async (req) => {
+    const b = z.object({ phone: z.string().regex(/^\+\d{6,16}$/) }).parse(req.body);
+    return { deleted: await deleteLateReplies(pool, tenantOf(req), b.phone) };
+  });
 
   /** Riconosce i nomi di chi ha risposto a consegne eliminate da un file Excel (consegne o report) dell'azienda. */
   app.post('/late-replies/names', { bodyLimit: 15 * 1024 * 1024 }, async (req) => {

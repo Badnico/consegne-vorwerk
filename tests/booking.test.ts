@@ -656,3 +656,15 @@ test('nomi delle risposte a consegne eliminate: da un file Excel e dal profilo W
   assert.equal(r.address, 'VIA ROMA 1, LECCE (LE)');
   assert.equal(r.file, 'LECCE.xlsx');
 });
+
+test('risposte a consegne eliminate: si elimina un cliente con tutti i suoi messaggi', async () => {
+  const { recordLateReply, listLateReplies, deleteLateReplies } = await import('../src/domain/latereplies.js');
+  for (const id of ['wamid.dl1', 'wamid.dl2']) {
+    await recordLateReply(pool, { deliveryId: null, providerId: id, fromDigits: '393405550077', phoneNumberId: undefined, answer: null, body: 'ciao', payload: {} });
+  }
+  await pool.query("UPDATE late_replies SET tenant_id = $1 WHERE provider_id IN ('wamid.dl1','wamid.dl2')", [T]);
+  assert.equal((await listLateReplies(pool, T)).filter((x) => x.phone === '+393405550077').length, 2);
+  assert.equal(await deleteLateReplies(pool, T2, '+393405550077'), 0); // altra azienda: niente
+  assert.equal(await deleteLateReplies(pool, T, '+393405550077'), 2);
+  assert.equal((await listLateReplies(pool, T)).filter((x) => x.phone === '+393405550077').length, 0);
+});
