@@ -430,9 +430,12 @@ export async function panelRoutes(app: FastifyInstance) {
   });
 
   app.put('/flow', async (req) => {
-    const b = z.object({ askPin: z.boolean() }).parse(req.body);
-    await saveFlow(pool, tenantOf(req), b);
-    return b;
+    const b = z.object({ askPin: z.boolean().optional(), bothChannels: z.boolean().optional(), cityGroups: z.boolean().optional() }).strict().parse(req.body);
+    const t = tenantOf(req);
+    // aggiorna solo i campi inviati, gli altri restano come sono
+    const next = { ...(await getFlow(pool, t)), ...Object.fromEntries(Object.entries(b).filter(([, v]) => v !== undefined)) };
+    await saveFlow(pool, t, next);
+    return next;
   });
 
   /* Modello WhatsApp personalizzato della proposta: stato, invio a Meta, ritorno allo standard */

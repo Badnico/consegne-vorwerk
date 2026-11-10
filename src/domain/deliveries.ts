@@ -181,7 +181,7 @@ export async function answerPin(id: string, received: boolean, actor = 'customer
   });
 }
 
-/** Primo messaggio non inviato (CAP/località esclusi in "Area servita"): il posto si libera e la consegna passa all'operatore. */
+/** Primo messaggio non inviato (CAP/località esclusi in "Funzioni Extra"): il posto si libera e la consegna passa all'operatore. */
 export async function markNotSent(id: string, reason: string, actor: string) {
   return tx(async (c) => {
     const row = await lockFor(c, id, ['proposed'], 'esclusione', undefined);

@@ -125,6 +125,7 @@ table.cal{border-collapse:separate;border-spacing:0;width:100%;min-width:720px}
 .chipsf button b{font-family:var(--f-mono);font-weight:500;margin-left:6px}
 .chipsf button[aria-pressed="true"]{background:var(--fg);border-color:var(--fg);color:var(--bg)}
 .search{min-width:0;flex:0 1 240px;border:1px solid var(--line);border-radius:6px;padding:7px 10px;background:var(--surface);font:inherit;font-size:13px}
+.sechead{font-size:15px;margin:18px 0 6px}
 .impgroups{border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin:10px 0;background:var(--surface)}
 .impgroups summary{cursor:pointer}
 .grpwrap{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;margin-top:8px}
@@ -346,7 +347,7 @@ a.btn{text-decoration:none;color:inherit;display:inline-flex;align-items:center}
         <button role="tab" id="t-list" aria-selected="false" data-tab="list">Consegne<span class="count" id="redCount" hidden></span></button>
         <button role="tab" id="t-new" aria-selected="false" data-tab="new">Nuova consegna</button>
         <button role="tab" id="t-slot" aria-selected="false" data-tab="slot">Slot e capienza</button>
-        <button role="tab" id="t-area" aria-selected="false" data-tab="area">Area servita</button>
+        <button role="tab" id="t-area" aria-selected="false" data-tab="area">Funzioni Extra</button>
         <button role="tab" id="t-msg" aria-selected="false" data-tab="msg">Messaggi</button>
         <button role="tab" id="t-rep" aria-selected="false" data-tab="rep">Report Excel</button>
       </div>
@@ -385,7 +386,6 @@ a.btn{text-decoration:none;color:inherit;display:inline-flex;align-items:center}
       </div>
 
       <div class="pane" id="p-new" hidden>
-        <div class="days" style="margin-bottom:12px"><label title="Vale per le consegne caricate da Excel e per quelle inserite a mano"><input type="checkbox" id="nBoth"> Invia sia su WhatsApp sia per email <small>(ai clienti che hanno entrambi i contatti)</small></label></div>
         <fieldset id="imp">
           <legend>Carica le consegne da Excel</legend>
           <p class="note">Una riga per consegna; se il file ha più fogli (es. uno per zona) li leggo tutti. Colonne necessarie: <b>Cliente</b>, <b>Indirizzo</b> e almeno uno tra <b>Telefono</b> ed <b>Email</b>. Facoltative: CAP, Località, Provincia, Ordine, Prodotto (o Brand), Importo Contrassegno, Priorita Evasione, Data e Fascia. Prima dell'invio puoi scegliere data e fascia per ogni cliente o compilarle in automatico.</p>
@@ -458,6 +458,17 @@ a.btn{text-decoration:none;color:inherit;display:inline-flex;align-items:center}
       </div>
 
       <div class="pane" id="p-area" hidden>
+        <fieldset>
+          <legend>Invio dei messaggi</legend>
+          <div class="days"><label title="Vale per le consegne caricate da Excel e per quelle inserite a mano"><input type="checkbox" id="nBoth"> Invia sia su WhatsApp sia per email <small>(ai clienti che hanno entrambi i contatti)</small></label></div>
+          <p class="hint note">Si salva da solo e vale per le consegne caricate da Excel e per quelle inserite a mano in "Nuova consegna".</p>
+        </fieldset>
+        <fieldset>
+          <legend>Gruppi di città all'import</legend>
+          <div class="days"><label><input type="checkbox" id="flowGroups"> Quando carico un Excel con più città, fammi scegliere se e come raggrupparle</label></div>
+          <p class="hint note">Prima dell'invio compare il riquadro "Raggruppa le città": metti insieme le città dello stesso giro, ogni gruppo ha la sua data e fascia e nel report Excel diventa un file a parte. Si salva da solo.</p>
+        </fieldset>
+        <h3 class="sechead">Area servita</h3>
         <p class="note">Quando il cliente risponde No, il sistema guarda il CAP dell'indirizzo. Dentro l'area può scegliere da solo la nuova data dal calendario; fuori riceve un messaggio diverso e la consegna passa all'operatore. Il testo per chi è fuori area si modifica nella scheda Messaggi.</p>
         <fieldset>
           <legend>CAP serviti</legend>
@@ -588,7 +599,7 @@ async function load(){
     const st = await api('/state');
     const cfgChanged = !same(cfg, st.schedule), areaChanged = !same(area, st.area), msgChanged = !same(msgs, st.messages);
     lateReplies = st.lateReplies || [];
-    cfg = st.schedule; area = st.area; msgs = {...MSG_DEFAULT, ...st.messages}; deliveries = st.deliveries; flow = st.flow || {askPin:true}; stFeatures = st.features || {}; $('nProd').placeholder = stFeatures.neutralExamples ? 'Es. Robot da cucina' : 'Thermomix TM7'; $('flowPin').checked = !!flow.askPin; if (st.timing && !ui.tmDirty) renderTiming(st.timing);
+    cfg = st.schedule; area = st.area; msgs = {...MSG_DEFAULT, ...st.messages}; deliveries = st.deliveries; flow = st.flow || {askPin:true}; stFeatures = st.features || {}; $('nProd').placeholder = stFeatures.neutralExamples ? 'Es. Robot da cucina' : 'Thermomix TM7'; $('flowPin').checked = !!flow.askPin; $('nBoth').checked = !!flow.bothChannels; $('flowGroups').checked = !!flow.cityGroups; if (st.timing && !ui.tmDirty) renderTiming(st.timing);
     if (cfgChanged && !ui.slotDirty) renderSlotEditor();
     if (areaChanged && !areaDirty) renderAreaEditor();
     if (msgChanged && !msgDraft) renderMsgEditor();
@@ -736,7 +747,7 @@ const MSG_FIELDS = [
     {k:'wa_confirmed', label:'Risposta dopo la conferma', st:'confermato', rows:2},
     {k:'wa_declined', label:'Risposta dopo il rifiuto', st:'da_riprogrammare', rows:3, req:['link'], hint:'Deve contenere {link}: è il collegamento per scegliere la nuova data.'},
     {k:'wa_rescheduled', label:'Conferma della nuova data', st:'riprogrammato', rows:2},
-    {k:'wa_out_area', label:'Risposta dopo il rifiuto, fuori area', st:'fuori_area', rows:3, hint:'Lo riceve chi risponde No ma ha un CAP fuori dall\'area servita, oppure tutti quelli che rispondono No se in "Area servita" è spuntato "Se clicca NO va richiamato".'},
+    {k:'wa_out_area', label:'Risposta dopo il rifiuto, fuori area', st:'fuori_area', rows:3, hint:'Lo riceve chi risponde No ma ha un CAP fuori dall\'area servita, oppure tutti quelli che rispondono No se in "Funzioni Extra" è spuntato "Se clicca NO va richiamato".'},
   ]},
   {g:'Domanda sul PIN (dopo il Sì)', ch:'wa', items:[
     {k:'wa_pin_question', label:'Domanda', st:'attesa_pin', rows:2, hint:'Arriva subito dopo il Sì, con i due pulsanti qui sotto. Se risponde No riceve la "Risposta se non ha il PIN" e va richiamato. Si attiva o spegne con la casella in alto.'},
@@ -876,6 +887,15 @@ setInterval(() => {
 }, 1000);
 // si salva da solo appena esci dal campo (o premi Invio), senza dover cercare il pulsante
 ['tmRem','tmNo'].forEach(id => $(id).addEventListener('change', () => { if (ui.tmDirty) saveTiming(); }));
+/** Funzioni Extra: le caselle si salvano da sole. */
+$('nBoth').addEventListener('change', async e => {
+  try { flow = await api('/flow', {method:'PUT', body:{bothChannels: e.target.checked}}); toast(flow.bothChannels ? 'Chi ha entrambi i contatti riceverà il messaggio su WhatsApp e per email' : 'Un solo canale: WhatsApp se c\'è il telefono, altrimenti email'); }
+  catch (err){ e.target.checked = !e.target.checked; toast(err.message); }
+});
+$('flowGroups').addEventListener('change', async e => {
+  try { flow = await api('/flow', {method:'PUT', body:{cityGroups: e.target.checked}}); toast(flow.cityGroups ? 'Gruppi di città attivi: li vedrai al prossimo Excel caricato' : 'Gruppi di città spenti'); if (imp.rows) renderImport(); }
+  catch (err){ e.target.checked = !e.target.checked; toast(err.message); }
+});
 $('flowPin').addEventListener('change', async e => {
   try { flow = await api('/flow', {method:'PUT', body:{askPin: e.target.checked}}); toast(flow.askPin ? 'Dopo il Sì verrà chiesto se ha ricevuto il PIN' : 'Domanda sul PIN spenta: il Sì conferma subito'); renderPhone(); }
   catch (err){ e.target.checked = !e.target.checked; toast(err.message); }
@@ -1541,7 +1561,7 @@ function impNewGroup(){
   imp.groups.push(g); return g;
 }
 function impGroupsHtml(){
-  if (!stFeatures.cityGroups) return '';
+  if (!flow.cityGroups) return '';
   const cities = impCities();
   if (cities.length < 2) return '';
   const dates = [...new Set(imp.slots.map(s => s.date))];
@@ -1588,7 +1608,7 @@ function renderImport(){
     <p class="note">"Compila in automatico" usa le fasce e le capienze di "Slot e capienza": a ogni cliente la prima fascia libera dal preavviso minimo in poi. Puoi poi cambiare data e fascia riga per riga.</p>
     ${impGroupsHtml()}
     <div class="impwrap"><table class="imptab"><thead><tr><th>Foglio · riga</th><th>Cliente</th><th>Indirizzo</th><th>Contatti</th><th>Ordine</th><th>Data proposta</th><th>Fascia oraria</th></tr></thead><tbody>${
-    imp.rows.map((x, i) => `<tr class="${!impSendable(x)?'bad':x.issue?'warnrow':''}"><td class="mono">${x.sheet ? esc(x.sheet)+' · ' : ''}${x.line}</td><td><b>${esc(x.name||'—')}</b>${x.product?`<small>${esc(x.product)}</small>`:''}${(x.cod_amount||0) > 0 ? `<span class="tagx">contrassegno ${x.cod_amount.toLocaleString('it-IT',{style:'currency',currency:'EUR'})}</span>` : ''}${x.pickup ? '<span class="tagx pk">ritiro</span>' : ''}${x.noSend ? `<span class="tagx ns" title="In Area servita è escluso: ${esc(x.noSend)}">nessun messaggio, da chiamare</span>` : ''}</td>
+    imp.rows.map((x, i) => `<tr class="${!impSendable(x)?'bad':x.issue?'warnrow':''}"><td class="mono">${x.sheet ? esc(x.sheet)+' · ' : ''}${x.line}</td><td><b>${esc(x.name||'—')}</b>${x.product?`<small>${esc(x.product)}</small>`:''}${(x.cod_amount||0) > 0 ? `<span class="tagx">contrassegno ${x.cod_amount.toLocaleString('it-IT',{style:'currency',currency:'EUR'})}</span>` : ''}${x.pickup ? '<span class="tagx pk">ritiro</span>' : ''}${x.noSend ? `<span class="tagx ns" title="In Funzioni Extra (Non mandare il primo messaggio a) è escluso: ${esc(x.noSend)}">nessun messaggio, da chiamare</span>` : ''}</td>
       <td>${esc(x.address)}<small class="mono">${esc(x.cap)}${x.cap && area.on && !inArea(x.cap) ? ' · fuori area' : ''}</small>${impGroupOf(x) ? `<span class="tagx grp">${esc(impGroupOf(x).name)}</span>` : ''}</td>
       <td>${x.phone?`<span class="mono">${esc(x.phone)}</span>`:''}${x.email?`<small>${esc(x.email)}</small>`:''}</td>
       <td class="mono">${esc(x.order_ref) || '<small>automatico</small>'}</td>

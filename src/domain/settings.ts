@@ -179,8 +179,13 @@ export interface ReportState { lastAuto?: string; lastTimeDay?: string; lastTime
 export const getReportState = (db: Db, t: string) => get<ReportState>(db, t, 'report_state', {});
 export const saveReportState = async (db: Db, t: string, patch: ReportState) => put(db, t, 'report_state', { ...(await getReportState(db, t)), ...patch });
 
-/** Percorso dei messaggi. askPin: dopo il Sì chiede "Hai ricevuto il PIN?" prima di confermare. */
-export interface FlowSetting { askPin: boolean }
+/**
+ * Percorso dei messaggi e funzioni extra dell'azienda.
+ * askPin: dopo il Sì chiede "Hai ricevuto il PIN?" prima di confermare.
+ * bothChannels: invia sia su WhatsApp sia per email a chi ha entrambi i contatti (scelta ricordata).
+ * cityGroups: caricando un Excel con più città si possono raggruppare (data e fascia per gruppo, report separato).
+ */
+export interface FlowSetting { askPin: boolean; bothChannels?: boolean; cityGroups?: boolean }
 export const getFlow = (db: Db, t: string) => get<FlowSetting>(db, t, 'flow', { askPin: true });
 
 /* ---------- tempi di sollecito e "senza risposta" (per azienda) ---------- */
