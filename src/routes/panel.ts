@@ -342,6 +342,9 @@ export async function panelRoutes(app: FastifyInstance) {
     return { rows, ok: rows.filter((r) => !r.errors.length && (!r.slotIssue || r.noSend)).length, first: open.first, slots };
   });
 
+  /** File di provenienza della consegna: con un gruppo di città diventa "FILE.xlsx · Gruppo", così il report si divide per gruppo. */
+  const fileOf = (fileName: string, group?: string) => (group ? `${fileName || 'Excel'} · ${group}`.slice(0, 250) : fileName || null);
+
   /** Crea le consegne valide e invia a tutti il messaggio. Le fasce vengono ricontrollate al momento. */
   app.post('/import/commit', { bodyLimit: 15 * 1024 * 1024 }, async (req) => {
     const row = z.object({
@@ -350,6 +353,7 @@ export async function panelRoutes(app: FastifyInstance) {
       product: z.string().max(120), order_ref: z.string().max(60),
       city: z.string().max(120).default(''), province: z.string().max(4).default(''),
       cod_amount: z.number().min(0).max(1_000_000).default(0), pickup: z.boolean().default(false),
+      group: z.string().trim().max(80).optional(), // gruppo di città scelto all'import: diventa un "file" a sé nei report
       source: z.array(z.object({ h: z.string().max(200), v: z.unknown() })).max(200).default([]),
       date: isoDate.nullable(), band: time.nullable(),
     }).refine((r) => r.phone || r.email, 'Serve almeno un contatto');
@@ -376,7 +380,7 @@ export async function panelRoutes(app: FastifyInstance) {
           customer: { name: r.name, phone_e164: r.phone || null, email: r.email || null, consent_whatsapp: Boolean(r.phone) },
           address: r.address, cap: r.cap || null, product: r.product || null,
           city: r.city || null, province: r.province || null, cod_amount: r.cod_amount, pickup: r.pickup, source: r.source,
-          slot_id: await slotIdFor(t, plan.slot.date, plan.slot.bandId), both_channels: b.bothChannels, import_file: b.fileName || null,
+          slot_id: await slotIdFor(t, plan.slot.date, plan.slot.bandId), both_channels: b.bothChannels, import_file: fileOf(b.fileName, (r as ImportRow & { group?: string }).group),
         }, actor, { notSent: excluded ?? undefined });
         refs.add(ref.toLowerCase()); people.add(personKey(r.name, r.address));
         if (!excluded) await enqueue.proposal(id);

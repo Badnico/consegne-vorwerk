@@ -125,6 +125,17 @@ table.cal{border-collapse:separate;border-spacing:0;width:100%;min-width:720px}
 .chipsf button b{font-family:var(--f-mono);font-weight:500;margin-left:6px}
 .chipsf button[aria-pressed="true"]{background:var(--fg);border-color:var(--fg);color:var(--bg)}
 .search{min-width:0;flex:0 1 240px;border:1px solid var(--line);border-radius:6px;padding:7px 10px;background:var(--surface);font:inherit;font-size:13px}
+.impgroups{border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin:10px 0;background:var(--surface)}
+.impgroups summary{cursor:pointer}
+.grpwrap{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;margin-top:8px}
+.grpcities{width:auto;min-width:0}
+.grpcities select{min-width:150px}
+.grplist{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(280px,1fr))}
+.grp{border:1px solid var(--line);border-radius:8px;padding:8px 10px;display:grid;gap:6px}
+.grprow{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.grprow input{flex:1;min-width:120px}
+.grprow select{max-width:100%}
+.tagx.grp{background:var(--violet-soft);color:var(--violet)}
 .latebox{border:1px solid var(--violet);background:var(--violet-soft);border-radius:10px;padding:10px 14px;font-size:13px}
 .latebox summary{cursor:pointer;font-weight:600}
 .latebox .lr{display:grid;grid-template-columns:110px 1fr auto auto;gap:4px 12px;padding:8px 0;border-top:1px solid var(--line);align-items:start}
@@ -1458,10 +1469,10 @@ $('askBar').addEventListener('click', async e => {
 });
 
 /* ---------- importazione da Excel ---------- */
-const imp = {rows:null, busy:false, result:null, file:'', slots:[], first:''};
+const imp = {rows:null, busy:false, result:null, file:'', slots:[], first:'', groups:[], cg:{}};
 $('impFile').addEventListener('change', async e => {
   const f = e.target.files[0]; e.target.value = ''; if (!f) return;
-  const err = $('impErr'); err.hidden = true; imp.rows = null; imp.result = null; imp.file = f.name;
+  const err = $('impErr'); err.hidden = true; imp.rows = null; imp.result = null; imp.file = f.name; imp.groups = []; imp.cg = {};
   if (f.size > 10 * 1024 * 1024){ err.textContent = 'Il file è troppo grande (massimo 10 MB).'; err.hidden = false; renderImport(); return; }
   $('impPrev').innerHTML = '<p class="note">Lettura del file…</p>';
   try {
@@ -1511,6 +1522,48 @@ function impBandOptions(x){
   if (!bands.length) return '<option value="">nessuna fascia</option>';
   return '<option value="">scegli…</option>' + bands.map(s => { const f = impFree(s.date, s.bandId, x); return `<option value="${s.bandId}" ${s.bandId===x.sel.bandId?'selected':''} ${f<=0 && s.bandId!==x.sel.bandId?'disabled':''}>${bandLabel(s.bandId)} · ${f<=0?'piena':f+' liberi'}</option>`; }).join('');
 }
+/* ----- gruppi di città (funzione extra "Gruppi di città all'import") ----- */
+const cityKey = x => ((x.city || '').trim().toUpperCase() || 'SENZA CITTÀ') + (x.province ? ` (${x.province.toUpperCase()})` : '');
+const impGroupOf = x => imp.groups.find(g => g.id === imp.cg[cityKey(x)]);
+function impCities(){
+  const m = new Map();
+  imp.rows.filter(impNeedsSlot).forEach(x => { const k = cityKey(x); m.set(k, (m.get(k) || 0) + 1); });
+  return [...m].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+}
+/** Dà a tutte le consegne del gruppo la data e la fascia del gruppo. */
+function impApplyGroup(g){
+  if (!g || !g.date) return;
+  imp.rows.filter(x => impNeedsSlot(x) && impGroupOf(x) === g).forEach(x => { x.sel = {date: g.date, bandId: g.bandId || ''}; });
+}
+function impNewGroup(){
+  let n = imp.groups.length + 1; while (imp.groups.some(g => g.name === 'Gruppo ' + n)) n++;
+  const g = {id: 'g' + Date.now().toString(36) + n, name: 'Gruppo ' + n, date: '', bandId: ''};
+  imp.groups.push(g); return g;
+}
+function impGroupsHtml(){
+  if (!stFeatures.cityGroups) return '';
+  const cities = impCities();
+  if (cities.length < 2) return '';
+  const dates = [...new Set(imp.slots.map(s => s.date))];
+  const cnt = g => imp.rows.filter(x => impNeedsSlot(x) && impGroupOf(x) === g).length;
+  const freeFor = (g, s) => s.free - imp.rows.filter(x => impNeedsSlot(x) && impGroupOf(x) !== g && x.sel.date === s.date && x.sel.bandId === s.bandId).length;
+  const grouped = cities.filter(([k]) => imp.cg[k]).length;
+  return `<details class="impgroups" ${imp.groupsOpen === false ? '' : 'open'}><summary><b>Raggruppa le città</b> · ${cities.length} città nel file${imp.groups.length ? ` · ${imp.groups.length} ${imp.groups.length === 1 ? 'gruppo' : 'gruppi'}, ${grouped} città raggruppate` : ''}</summary>
+    <p class="note">Metti insieme le città da servire nello stesso giro: ogni gruppo ha la sua data e fascia, e nel report Excel diventa un file a parte. Le città senza gruppo restano come sono. Se non ti serve, lascia tutto su "nessun gruppo".</p>
+    <div class="grpwrap">
+      <table class="imptab grpcities"><thead><tr><th>Città</th><th>Consegne</th><th>Gruppo</th></tr></thead><tbody>${cities.map(([k, n]) => `<tr><td><b>${esc(k)}</b></td><td class="mono">${n}</td><td><select data-gcity="${esc(k)}" aria-label="Gruppo per ${esc(k)}"><option value="">— nessun gruppo —</option>${imp.groups.map(g => `<option value="${g.id}" ${imp.cg[k] === g.id ? 'selected' : ''}>${esc(g.name)}</option>`).join('')}<option value="__new">+ nuovo gruppo</option></select></td></tr>`).join('')}</tbody></table>
+      <div class="grplist">${imp.groups.map(g => { const c = cnt(g), bands = imp.slots.filter(s => s.date === g.date), cur = bands.find(s => s.bandId === g.bandId), fr = cur ? freeFor(g, cur) : null;
+        const cityNames = cities.filter(([k]) => imp.cg[k] === g.id).map(([k]) => k);
+        return `<div class="grp">
+          <div class="grprow"><input data-gname="${g.id}" value="${esc(g.name)}" maxlength="60" aria-label="Nome del gruppo"><button class="btn ghost danger" type="button" data-gdel="${g.id}">Elimina gruppo</button></div>
+          <small>${cityNames.length ? esc(cityNames.join(', ')) : 'Nessuna città: scegli il gruppo accanto alle città'} · <b>${c}</b> ${c === 1 ? 'consegna' : 'consegne'}</small>
+          <div class="grprow"><select data-gdate="${g.id}" aria-label="Data del gruppo"><option value="">data…</option>${dates.map(d => `<option value="${d}" ${d === g.date ? 'selected' : ''}>${esc(fmtShort(d))}</option>`).join('')}</select>
+            <select data-gband="${g.id}" aria-label="Fascia del gruppo" ${g.date ? '' : 'disabled'}>${g.date ? '<option value="">fascia…</option>' + bands.map(s => { const f = freeFor(g, s); return `<option value="${s.bandId}" ${s.bandId === g.bandId ? 'selected' : ''}>${bandLabel(s.bandId)} · ${f <= 0 ? 'piena' : f + ' liberi'}</option>`; }).join('') : '<option value="">prima la data</option>'}</select></div>
+          ${cur && fr < c ? `<small class="why">In questa fascia ci sono ${Math.max(fr, 0)} posti liberi per ${c} consegne: aumenta la capienza in "Slot e capienza" o dividi il gruppo.</small>` : ''}
+        </div>`; }).join('')}
+        <button class="btn" type="button" id="gAdd">+ Nuovo gruppo</button></div>
+    </div></details>`;
+}
 function renderImport(){
   const box = $('impPrev');
   if (imp.result){
@@ -1533,9 +1586,10 @@ function renderImport(){
       <button class="btn" id="impAll" type="button">Applica</button>
     </div>
     <p class="note">"Compila in automatico" usa le fasce e le capienze di "Slot e capienza": a ogni cliente la prima fascia libera dal preavviso minimo in poi. Puoi poi cambiare data e fascia riga per riga.</p>
+    ${impGroupsHtml()}
     <div class="impwrap"><table class="imptab"><thead><tr><th>Foglio · riga</th><th>Cliente</th><th>Indirizzo</th><th>Contatti</th><th>Ordine</th><th>Data proposta</th><th>Fascia oraria</th></tr></thead><tbody>${
     imp.rows.map((x, i) => `<tr class="${!impSendable(x)?'bad':x.issue?'warnrow':''}"><td class="mono">${x.sheet ? esc(x.sheet)+' · ' : ''}${x.line}</td><td><b>${esc(x.name||'—')}</b>${x.product?`<small>${esc(x.product)}</small>`:''}${(x.cod_amount||0) > 0 ? `<span class="tagx">contrassegno ${x.cod_amount.toLocaleString('it-IT',{style:'currency',currency:'EUR'})}</span>` : ''}${x.pickup ? '<span class="tagx pk">ritiro</span>' : ''}${x.noSend ? `<span class="tagx ns" title="In Area servita è escluso: ${esc(x.noSend)}">nessun messaggio, da chiamare</span>` : ''}</td>
-      <td>${esc(x.address)}<small class="mono">${esc(x.cap)}${x.cap && area.on && !inArea(x.cap) ? ' · fuori area' : ''}</small></td>
+      <td>${esc(x.address)}<small class="mono">${esc(x.cap)}${x.cap && area.on && !inArea(x.cap) ? ' · fuori area' : ''}</small>${impGroupOf(x) ? `<span class="tagx grp">${esc(impGroupOf(x).name)}</span>` : ''}</td>
       <td>${x.phone?`<span class="mono">${esc(x.phone)}</span>`:''}${x.email?`<small>${esc(x.email)}</small>`:''}</td>
       <td class="mono">${esc(x.order_ref) || '<small>automatico</small>'}</td>
       ${x.noSend && impSendable(x) ? `<td colspan="2"><small>Nessun messaggio: la data la assegni tu dopo averlo chiamato</small></td>`
@@ -1555,9 +1609,30 @@ $('impPrev').addEventListener('change', e => {
     if (!ok){ const s = imp.slots.find(s => s.date === x.sel.date && impFree(s.date, s.bandId, x) > 0); x.sel.bandId = s ? s.bandId : ''; }
     renderImport();
   } else if (d.impb !== undefined){ imp.rows[+d.impb].sel.bandId = e.target.value; renderImport(); }
+  else if (d.gcity !== undefined){
+    let v = e.target.value;
+    if (v === '__new') v = impNewGroup().id;
+    if (v) imp.cg[d.gcity] = v; else delete imp.cg[d.gcity];
+    impApplyGroup(imp.groups.find(g => g.id === v));
+    renderImport();
+  } else if (d.gname !== undefined){
+    const g = imp.groups.find(g => g.id === d.gname), name = e.target.value.trim().slice(0, 60);
+    if (!name || imp.groups.some(o => o !== g && o.name.toLowerCase() === name.toLowerCase())){ toast(name ? 'Esiste già un gruppo con questo nome' : 'Il gruppo deve avere un nome'); renderImport(); return; }
+    g.name = name; renderImport();
+  } else if (d.gdate !== undefined){
+    const g = imp.groups.find(g => g.id === d.gdate); g.date = e.target.value;
+    if (!imp.slots.some(s => s.date === g.date && s.bandId === g.bandId)) g.bandId = (imp.slots.find(s => s.date === g.date) || {}).bandId || '';
+    impApplyGroup(g); renderImport();
+  } else if (d.gband !== undefined){
+    const g = imp.groups.find(g => g.id === d.gband); g.bandId = e.target.value; impApplyGroup(g); renderImport();
+  }
 });
+$('impPrev').addEventListener('toggle', e => { if (e.target.classList?.contains('impgroups')) imp.groupsOpen = e.target.open; }, true);
 $('impPrev').addEventListener('click', async e => {
   if (e.target.closest('#impClose')){ imp.rows = null; imp.result = null; $('impErr').hidden = true; renderImport(); return; }
+  if (e.target.closest('#gAdd')){ impNewGroup(); renderImport(); return; }
+  const gd = e.target.closest('[data-gdel]');
+  if (gd){ const id = gd.dataset.gdel; imp.groups = imp.groups.filter(g => g.id !== id); Object.keys(imp.cg).forEach(k => { if (imp.cg[k] === id) delete imp.cg[k]; }); renderImport(); return; }
   if (e.target.closest('#impAuto')){ const none = impAuto(); renderImport(); toast(none ? `${none} ${none===1?'cliente':'clienti'} senza fascia libera: aumenta la capienza o i giorni` : 'Date e fasce assegnate in automatico'); return; }
   if (e.target.closest('#impAll')){
     const dd = $('impAllD').value, bb = $('impAllB').value;
@@ -1567,7 +1642,7 @@ $('impPrev').addEventListener('click', async e => {
   }
   if (!e.target.closest('#impGo') || imp.busy) return;
   impCheck();
-  const rows = imp.rows.filter(x => impSendable(x) && !x.issue).map(({errors, slot, slotIssue, auto, sel, issue, noSend, ...r}) => noSend ? {...r, date: null, band: null} : ({...r, date: sel.date, band: sel.bandId.split('-')[0]}));
+  const rows = imp.rows.filter(x => impSendable(x) && !x.issue).map(x => { const g = impGroupOf(x); const {errors, slot, slotIssue, auto, sel, issue, noSend, ...r} = x; if (g) r.group = g.name; return noSend ? {...r, date: null, band: null} : ({...r, date: sel.date, band: sel.bandId.split('-')[0]}); });
   imp.busy = true; renderImport();
   try {
     imp.result = await api('/import/commit', {body:{rows, bothChannels: $('nBoth').checked, fileName: imp.file}}); imp.rows = null;
