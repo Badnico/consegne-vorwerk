@@ -164,8 +164,9 @@ export const REPORT_DEFAULT: ReportSetting = { hours: 0, email: true, to: '', at
 
 /* ---------- funzioni extra per ambiente (si attivano dal pannello amministratore) ---------- */
 
-export interface Features { reportAtTime?: boolean; neutralExamples?: boolean; cityGroups?: boolean }
-export const FEATURE_LABELS: Record<keyof Features, string> = { reportAtTime: 'Report Excel a orario fisso', neutralExamples: 'Esempi senza marchi', cityGroups: 'Gruppi di città all\'import' };
+/** legacyLayout: portale com'era prima di "Funzioni Extra" (resta così per chi lo ha, es. Futura Service). */
+export interface Features { reportAtTime?: boolean; neutralExamples?: boolean; cityGroups?: boolean; legacyLayout?: boolean }
+export const FEATURE_LABELS: Record<keyof Features, string> = { reportAtTime: 'Report Excel a orario fisso', neutralExamples: 'Esempi senza marchi', cityGroups: 'Gruppi di città all\'import', legacyLayout: 'Portale classico (Area servita)' };
 /** Prodotto usato negli esempi del portale: generico per le aziende con "Esempi senza marchi", altrimenti quello di sempre. */
 export const exampleProduct = (f: Features, usual: string) => (f.neutralExamples ? 'Robot da cucina' : usual);
 export async function getFeatures(db: Db, tenantId: string): Promise<Features> {
